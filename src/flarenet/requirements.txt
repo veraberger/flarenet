@@ -1,1 +1,8 @@
+what versions you need to use e.g. 
+write down what my computer is running, can use packages to figure out whether my code would work w other versions
 
+astropy
+numpy 
+pandas?
+scikit-learn 
+tensorflow
