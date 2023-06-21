@@ -8,10 +8,12 @@ other funcs
 """
 
 import numpy as np 
+import pandas as pd
 import sklearn
 import lightkurve as lk
 import matplotlib.pyplot as plt
 import astropy.units as u
+import glob
 import pdb
 
 from flare_model import *
@@ -81,35 +83,58 @@ class TimeSeries:
             If input parameters for `mode` or `side` don't match the given options.
 
         """
-        
-        # if mode == 'median':
-        #     prelim_pad_flux = np.full((1, cadences), np.nanmedian(self.flux))# extend the first or last data point
-        #     pad_err = 0.00002 # need some way to generate uncertainties
-        #     # pad_err = np.percentile(self.flux, 5)
-        # elif mode == 'tess_noise': 
-        #     prelim_pad_flux = 0 # insert data from some slightly noisy tess light curve? 
-        #     pad_err = [0] # this will throw an error later bc it is length one, not cadences
-        # else:
-        #     raise ValueError(f"'{side}' is not an available mode. Choose `median` or `tess_noise`.")
-        # pad_flux = np.random.normal(prelim_pad_flux, pad_err) # instead take std of lc near the endpoint and use that as the std for np.random.normal
+        if side in ['left', 'both']:
+            # t_left = np.linspace(self.time[0]-(cadences*20*u.second), self.time[0]-20*u.second, num=cadences) 
+            t_left = np.linspace(self.time[0]-(cadences*20), self.time[0]-20, num=cadences) 
+            print(t_left)
+            t_ext = np.append(t_left, self.time)
+            print(t_ext)
+            print(self.time)
 
-        if side in ['left', 'both']: 
-            t_left = np.linspace(self.time[0]-(cadences*20*u.second), self.time[0]-20*u.second, num=cadences) 
-            self.time = np.append(t_left, self.time)
-            f_left = np.full((1, cadences), self.flux.value[-1])
-            self.flux = np.append(f_left, self.flux)
-            self.flux_err = np.append(pad_err, self.flux_err)
+            if mode == 'endpt':
+                prelim_f_left = np.full((1, cadences), self.flux.value[0])
+                std_left = np.std(self.flux[:300]) # arbitrary choice
+                f_left = np.random.normal(prelim_f_left, std_left)
+            elif mode == 'tess_noise':
+                prelim_f_left = np.full((1, cadences), self.flux.value[0]) # actually change this and put in a tess LC
+                std_left = np.std(self.flux[:300])
+                f_left = np.random.normal(prelim_f_left, std_left)
+            else:
+                raise ValueError(f"'{mode}' is not an available mode. Choose `endpt` or `tess_noise`.")
+            f_ext = np.append(f_left, self.flux.value)
 
         if side in ['right', 'both']: 
-            t_right = np.linspace(self.time.max() + 20*u.second, self.time.max()+(cadences*20*u.second), num=cadences) # time must be in seconds for this to work
-            self.time = np.append(self.time, t_right)
-            f_right = np.full((1, cadences), self.flux.value[0]) # HOW TO ISOLATE A SINGLE FLUX VALUE... 
-            self.flux = np.append(self.flux, f_right)
-            self.flux_err = np.append(self.flux_err, pad_err)
+            # t_right = np.linspace(self.time.max() + 20*u.second, self.time.max()+(cadences*20*u.second), num=cadences) 
+            t_right = np.linspace(self.time.max() + 20, self.time.max()+(cadences*20), num=cadences) # time must be in seconds for this to work
 
+
+            if mode == 'endpt':
+                prelim_f_right= np.full((1, cadences), self.flux.value[-1])
+                std_right = np.std(self.flux[-300:]) # arbitrary choice
+                f_right = np.random.normal(prelim_f_right, std_right)
+            elif mode == 'tess_noise':
+                prelim_f_right= np.full((1, cadences), self.flux.value[-1])
+                std_right = np.std(self.flux[-300:]) # arbitrary choice
+                f_right = np.random.normal(prelim_f_right, std_right)
+            else:
+                raise ValueError(f"'{mode}' is not an available mode. Choose `endpt` or `tess_noise`.")
+
+            if side == 'both': 
+                t_ext = np.append(t_ext, t_right)
+                f_ext = np.append(f_ext, f_right)
+            else: 
+                t_ext = np.append(self.time, t_right)
+                f_ext = np.append(self.flux, f_right)
+            # self.flux_err = np.append(self.flux_err, pad_err)
+        
         elif side not in ['left', 'right', 'both']: 
             raise ValueError(f"'{side}' is not an option. Choose `left`, `right`, or `both`.")
+        print(t_ext)
+        return t_ext, f_ext
         
+
+    
+    
 
     def invert(self):
         """
@@ -139,8 +164,9 @@ tlc = lk.search_lightcurve('TIC 219852882', exptime=20).download_all().stitch()
 
 mylc = TimeSeries(tlc)
 
-ax[0].plot(mylc.time.value, mylc.flux.value, color='tab:purple', marker='s', markersize=1, ls='none')
+ax[0].plot(mylc.time.value, mylc.flux.value, color='tab:pink', marker='s', markersize=1, ls='none')
 
+print(len(glob.glob('/Users/veraberger/.lightkurve/cache/mastDownload/TESS/*')))
 
 mylc.normalize()
 # plt.plot(mylc.time, mylc.flux)
@@ -148,9 +174,9 @@ mylc.normalize()
 mylc.flux= mylc.invert() # there must be a better way to do this? or do you just replace the flux every time
 
 
-
-t_ext, f_ext, ferr_ext = mylc.pad(side='both')
-ax[1].plot(t_ext, f_ext,  color='tab:green', marker='o', markersize=1, ls='none')
+# invert or normalize or pad gets rid of the astropy quantity object :(
+t_ext, f_ext = mylc.pad(side='left')
+ax[1].plot(t_ext.value, f_ext.value, color='tab:brown', marker='s', markersize=1, ls='none')
 ax[1].set_xlabel('Time [s]')
 ax[0].set_ylabel('SAP Flux')
 ax[1].set_ylabel('Relative Flux & Inverted')
