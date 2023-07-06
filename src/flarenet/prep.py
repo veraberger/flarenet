@@ -16,122 +16,57 @@ import astropy.units as u
 import glob
 import pdb
 
-from flare_model import *
-
-__all__ = ['TimeSeries'] 
 
 
-class TimeSeries:
 
-    def __init__(self, lc):
-        """
-        Initializes the time series class. 
-        Creates an object with attributes time, flux, and flux error using attributes from lightkurve objects.
-        """
-        self.time = lc.time
-        self.flux = lc.sap_flux
-        self.flux_err = lc.sap_flux_err
-        self.id = lc.meta['OBJECT'].split(' ')[1]
-        self.sector = lc.meta['SECTOR']
-        
+__all__ = ['FlareLightCurve'] 
 
-    def normalize(self, mode='max'): # also need to normalize flux errors? or just feed them into this function? 
-        """ Normalize flux values in a light curve
+
+class FlareLightCurve:
+    """
+    NEED A DOCSTRING
+    note: here self.flux is not sap flux. easy change but remember it
+    """
+
+    @staticmethod
+    def from_lightkurve(path):
+        return FlareLightCurve.read(path)
+
+
+    def normalize(self, norm='median'):
+        """ Normalize flux and flux uncertainty values in a light curve
 
         Parameters
         ----------
-        mode : str
+        norm : str
             The norm to use for normalization
-            "l1" : Sum of the magnitudes of the values
-            "l2" : Euclidean norm
-            "max" : Maximum value
-            "median" : Median value
+            "median" : Median flux
+            "max" : Maximum flux
+            "l1" : Sum of the magnitudes of the fluxes
+            "l2" : Euclidean norm: square root of the sum of squares of the fluxes
+            
         Returns
         -------
-        lc_copy (or do i leave this blank?) : array-like ? 
-            Normalized fluxes
+        what is the notation for this? 
+            A copy of the input light curve with normalized flux and flux_err values
         """
-        if mode in ['l1', 'l2', 'max']:
-            self.flux = self.flux.reshape(-1,1)
-            return sklearn.preprocessing.normalize(self.flux, norm=mode, axis=0, copy=False, return_norm=False)
-        elif mode == 'median':
-            self.flux = self.flux/np.nanmedian(self.flux)
-            self.flux_err = self.flux_err/np.nanmedian(self.flux)
-            self.flux -= 1 # zero-center
+        if norm == 'median':
+            return lk.normalize(self)  # is this good notation
+        elif norm == 'max': # not really this easy. see lk normalize documentation for edge cases
+            lc = self.copy()
+            max_flux = np.nanmax(lc.flux)
+            lc.flux = lc.flux/max_flux
+            lc.flux_err = lc.flux_err/max_flux
+            return lc
+        elif  norm == 'l1' or norm == 'l2':
+            raise NotImplementedError
         else:
-            raise ValueError("{mode} is not an available mode. Pick one of: `l1`, `l2`, `max`, or `median`.")
-        
-
-
-    def pad(self, cadences = 500, mode = 'endpt', side = 'both'):
-        """ Extend a light curve by a given number of cadences.
-        Parameters
-        ----------
-        cadences : int
-            Number of cadences to extend the light curve by.
-
-        side : str
-            Which side of the light curve to pad.
-            "both" : both sides.
-            "start" : prior to the start of the light curve
-            "end" : at the end of the light curve
-    
-        Returns
-        -------
-        filled_lc : 2D array ?
-            Light curve with extended time, flux, and flux error values.
-
-        Raises
-        ------
-        ValueError
-            If input value for `cadences` is not an integer
-
-        """
-        if not type(cadences) == int: 
-            raise ValueError('`cadences` must be an integer. Please try again.')
-        
-        if side in ['left', 'both']:
-            t_left = np.linspace(self.time[0]-(cadences*20*u.second), self.time[0]-20*u.second, num=cadences)
-            t_ext = np.append(t_left, self.time)
-
-            prelim_f_left = np.full((1, cadences), self.flux.value[0]) # create an array of fluxes w value of the first point in the lc
-            std_left = np.std(self.flux[:cadences]) # take std of first 'cadences' number of observations in the lc
-            f_left = np.random.normal(prelim_f_left, std_left) # add noise to extended fluxes
-            f_ext = np.append(f_left, self.flux.value)
-
-            ferr_left = np.full((1, cadences), std_left) # CHECK THIS...
-            ferr_ext = np.append(ferr_left, self.flux_err)
-
-
-        if side in ['right', 'both']: 
-            t_right = np.linspace(self.time.max() + 20*u.second, self.time.max()+(cadences*20*u.second), num=cadences) 
-            prelim_f_right= np.full((1, cadences), self.flux.value[-1])
-            std_right = np.std(self.flux[-1*cadences:]) 
-            f_right = np.random.normal(prelim_f_right, std_right)
-
-            ferr_right = np.full((1, cadences), std_right) # CHECK THIS...
-
-            if side == 'both': 
-                t_ext = np.append(t_ext, t_right)
-                f_ext = np.append(f_ext, f_right)
-                ferr_ext = np.append(ferr_ext, ferr_right)
-            else: 
-                t_ext = np.append(self.time, t_right)
-                f_ext = np.append(self.flux, f_right)
-                ferr_ext = np.append(self.flux_err, ferr_right)
-
-        
-        elif side not in ['left', 'right', 'both']: 
-            raise ValueError(f"'{side}' is not an option. Choose `left`, `right`, or `both`.")
-        print(t_ext)
-        return t_ext, f_ext, ferr_ext
-
-    
+            raise ValueError(f"{norm} is not an available norm. Pick one of: `l1`, `l2`, `max`, or `median`.")
     
 
     def invert(self):
         """
-        Takes a series of floats and computes the inverse, leaving 0 values as 0.
+       Inverts fluxes and flux errors in a light curve
 
         Returns
         -------
@@ -140,13 +75,27 @@ class TimeSeries:
             Float values of the inverses of all the input elements.
 
         """
-        maskedarr = np.ma.masked_where(self.flux == 0, self.flux) # there must be a better way to deal w this.
-        inv = (1/maskedarr).filled(fill_value=0)
-        return inv
+        # maskedarr = np.ma.masked_where(self.flux==0, self.flux) # trying to work w fluxes of 0
+        # inv = (1/maskedarr).filled(fill_value=0)
+        self.flux = 1/self.flux # can we assume that the flux is never 0?
+        self.flux_err = self.flux_err/self.flux**2
+        return self
 
+    def rm_upper_outliers(self, sigma=3.0):
+        """
+        Wrapper function for lightkurve remove_outliers function
+        to remove upper outliers using sigma clipping.
 
-    def rm_upper_outliers(self, s=3.0):
-        return lk.LightCurve.remove_outliers(self, sigma_upper = s, sigma_lower = float('inf'))
+        Parameters
+        ----------
+        sigma : float
+            Number of standard deviations above the mean for which to remove outliers
+
+        Returns
+        -------
+            Light curve with upper outliers removed
+        """
+        return lk.LightCurve.remove_outliers(self, sigma_upper=sigma, sigma_lower=float('inf'))
     
     def segment(self, outdir='segmented_df', gap=600):
         """ Split a light curve into segments by gaps in observations, 
@@ -165,31 +114,28 @@ class TimeSeries:
         csvs for segmented light curve saved into the outdir directory
 
         """
-        # look at self.time
-        newdf = pd.DataFrame(data=np.asarray([self.time.value*86400, self.flux.value, self.flux_err.value]).T, columns=['time_s', 'flux', 'flux_err'])
-        # delta_t = pd.Series(self.time.value*86400).diff() # FIGURE THIS OUT W THE UNITS....
+        newdf = pd.DataFrame(data=np.asarray([self.time.value*86400, self.flux.value, self.flux_err.value]).T, columns=['time_s', 'flux', 'flux_err']) # assumes time in seconds
         newdf['delta_t'] = newdf['time_s'].diff()
         newdf['delta_t'] = round(newdf['delta_t'], 2)
-        gap_indices = newdf.index[newdf['delta_t'] > gap]
+        gap_indices = newdf.index[newdf['delta_t']>gap]
         gap_indices.insert(0, 0)
         segment_lengths = []
         for i in range(len(gap_indices)-1): 
             start_index = gap_indices[i]
             end_index = gap_indices[i+1]
-            cutdf = newdf.iloc[start_index : end_index]
+            cutdf = newdf.iloc[start_index:end_index]
             segment_lengths.append(len(cutdf))
             cutdf.to_csv(outdir+'/'+self.id+'_'+str(self.sector)+'_'+str(i)+'.csv', sep=',')
-        
-        # plt.hist(segment_lengths, bins=[50, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000, 30000])
-        # plt.xlabel("segment length (cadences)")
-        # # plt.savefig('/Users/veraberger/nasa/figures/histogram_segments_sep_by_10_min.png', dpi=200, bbox_inches='tight')
-        # plt.show()
-        # print(segment_lengths.count(1))
-        # print(len(segment_lengths))
-        # return segment_lengths
 
-        # if there are gaps between one point and another that a greater than 600*u.second, split the lc.
-        # make a new column which is t_i - t_{i-1} the difference between times at adjacent points. then for pts in that new col. but that's a single sector way of doing it
-        # alternatively, ask what the greatest time separation is between two gaps, see if it's greater than my limit, do recursion.
-        # save all the segmented time, flux, ferr into new files in outdir/TICID-sector-visitnum.csv
-    
+    def get_windows(self, n=100):
+        """
+        You might rename this
+
+
+        Returns a np.ndarray of flux and flux error values shape n_flux_points x window_length
+        Where necessary this will be padded with 0. maybe don't want 0 though because 0 then a much higher flux could look like a flare w a quick rise?
+        """
+        padded_flux = np.hstack([np.zeros(n//2), self.flux.value, np.zeros(n//2)])
+        flux_data = np.asarray([padded_flux[idx:idx+n] for idx in
+                                 np.arange(0, len(self.flux.value))-n//2])
+        return flux_data#, flux_err_data
