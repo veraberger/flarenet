@@ -18,7 +18,6 @@ import pdb
 
 
 
-
 __all__ = ['FlareLightCurve'] 
 
 
@@ -30,11 +29,12 @@ class FlareLightCurve:
 
     @staticmethod
     def from_lightkurve(path):
-        return FlareLightCurve.read(path)
+        return lk.read(path) # i'm not sure about this
 
 
     def normalize(self, norm='median'):
         """ Normalize flux and flux uncertainty values in a light curve
+            might want to remove all the options and just normalize -1 to 1
 
         Parameters
         ----------
@@ -77,7 +77,7 @@ class FlareLightCurve:
         """
         # maskedarr = np.ma.masked_where(self.flux==0, self.flux) # trying to work w fluxes of 0
         # inv = (1/maskedarr).filled(fill_value=0)
-        self.flux = 1/self.flux # can we assume that the flux is never 0?
+        self.flux = 1/self.flux # can we assume that the flux is never 0? although maybe we don't need this func at all anymore
         self.flux_err = self.flux_err/self.flux**2
         return self
 
@@ -98,7 +98,12 @@ class FlareLightCurve:
         return lk.LightCurve.remove_outliers(self, sigma_upper=sigma, sigma_lower=float('inf'))
     
     def segment(self, outdir='segmented_df', gap=600):
-        """ Split a light curve into segments by gaps in observations, 
+        """ This is sort of a placeholder function; 
+            I wrote it because I think we will segment light curves by orbit or some gap that is large enough that we do not want to fill it in.
+            I doubt that csv file output is the move. 
+            Feedback especially appreciated.
+
+            Split a light curve into segments by gaps in observations, 
             create csv files for each segment with time, flux, and flux_error values
 
         Parameters
@@ -114,9 +119,12 @@ class FlareLightCurve:
         csvs for segmented light curve saved into the outdir directory
 
         """
-        newdf = pd.DataFrame(data=np.asarray([self.time.value*86400, self.flux.value, self.flux_err.value]).T, columns=['time_s', 'flux', 'flux_err']) # assumes time in seconds
+        # i'm not even sure if we need to save the times
+        newdf = pd.DataFrame(data=np.asarray([self.time.value*86400, self.flux.value, self.flux_err.value]).T, columns=['time_s', 'flux', 'flux_err']) # assumes time in seconds..
+        # look at gaps between each observation
         newdf['delta_t'] = newdf['time_s'].diff()
         newdf['delta_t'] = round(newdf['delta_t'], 2)
+        # find indices where gap is large enough to warrant splitting the lc
         gap_indices = newdf.index[newdf['delta_t']>gap]
         gap_indices.insert(0, 0)
         segment_lengths = []
@@ -127,15 +135,25 @@ class FlareLightCurve:
             segment_lengths.append(len(cutdf))
             cutdf.to_csv(outdir+'/'+self.id+'_'+str(self.sector)+'_'+str(i)+'.csv', sep=',')
 
-    def get_windows(self, n=100):
+    def get_windows(self, n=600):
         """
-        You might rename this
+        Takes in a light curve and returns windows of size n
+        Currently redundant bc it saves n times as many points as we begin with.
 
-
-        Returns a np.ndarray of flux and flux error values shape n_flux_points x window_length
-        Where necessary this will be padded with 0. maybe don't want 0 though because 0 then a much higher flux could look like a flare w a quick rise?
+        Parameters
+        ----------
+        n : int
+            Window size
+        
+        Returns
+        -------
+        flux_data: an np.ndarray of flux and flux error values shape n_flux_points x window_length
+                    Where necessary this will be padded with the endpoint of the light curve, with added random gaussian noise.
         """
-        padded_flux = np.hstack([np.zeros(n//2), self.flux.value, np.zeros(n//2)])
+        
+        f_left = np.random.normal(np.full((1, n//2), self.flux.value[0]), np.std(self.flux[:n//2])) 
+        f_right = np.random.normal(np.full((1, n//2), self.flux.value[-1]), np.std(self.flux[-1*n//2:])) 
+        padded_flux = np.hstack([f_left, self.flux.value, f_right])
         flux_data = np.asarray([padded_flux[idx:idx+n] for idx in
                                  np.arange(0, len(self.flux.value))-n//2])
-        return flux_data#, flux_err_data
+        return flux_data
