@@ -1,73 +1,97 @@
 import numpy as np
 from scipy import special
+from sklearn.preprocessing import RobustScaler
 from scipy.stats import binned_statistic
 from astroquery.mast import Catalogs
 from numpy.random import uniform
 
-# maybe get target distances saved somewhere
-# and look at the ones w/o a distance
 
-# with open('ward/flare_tics.txt', 'r') as infile: 
-#     ids = [x.strip() for x in infile.readlines()]
-#     for x in ids[:]:
-#         catalog_data = Catalogs.query_object(x, catalog="Tic", radius="1 arcsec")
-#         print(x)
-#         print(len(catalog_data))
-#         print(np.max(catalog_data['d']))
-#         print(np.min(catalog_data['d']))
-#         print(np.nanmedian(catalog_data['d']))
-#         print('*'*20)
-
-
-
-
-
-def inject(lcfile, num_flares=50):
+def flare_generator(lcfile, num_flares=50, flaredir='flareArrs/', paramdir='artificial_flare_params/'):
     """
-
-    take in a LightCurve orbit, 
-    probs a npy file
-impuli
-choose a flare tpeak at random from a uniform distribution over the range (lc.time.min(), lc.time.max())
+    Take a ticid_orbitnum_data.npy file with time and flux in the first and second column, respectively
+    For a given number of iterations, 
+    Generate and inject artificial flares into randomized points in the light curve, 
+    such that approximately 50% of the timespan is occupied by a flare
     """
-    # # this is all fake code
+    # read in the time series
     datafile = np.load(lcfile)
     t = datafile[0]
     f = datafile[1]
-    ferr = datafile[2]
+    ticid = lcfile.split('_')[0]
 
-    ticid = "AU Mic" # replace 
+    # normalize & zero-center the flux
+    f = RobustScaler().fit_transform(f)
 
-    f, ferr = _prep4inject(f, ferr) # divide by median and zero-center. fluxes not necessarily btw -1 to 1, do we want that?
-    # use robust scaler
-
+    # initialize arrays of multi-flare light curves
     flareArr = np.empty((num_flares, len(f)))
-    new_f = f.copy()
+    paramsArr = np.array()
+    
     for i in range(num_flares):
-        flares_per_orbit = uniform(1,4) # choose some number of flares to inject during that orbit
-        # maybe want 50% of the lc to be flares
-        # 10 % of the time w flares to be complex
+        new_f = np.zeros((1, len(f)))
+        # choose some number of flares to inject during that orbit: one a day to 5 a day + 1 more per day for 20% complex (idk)
+        flares_per_orbit = uniform(14, 84)
         for i in range(flares_per_orbit):
-            tpeak = uniform(t.min(), t.max())
-
             # generate artificial flare parameters
-            e_flare = _get_random_energy() # need to save this somewhere
+            tpeak = uniform(t.min(), t.max())
+            # draw a random energy and convert to relative amplitude
+            e_flare = _get_random_energy()
             ed_flare = energy_to_ed(e_flare, get_dist_cm(ticid))
             ampl = ed_to_rel_ampl(ed_flare) # since the flux is normalized and zero-centered, I think we can treat this as The amplitude
             fwhm = ampl_to_fwhm(ampl) # help
+            
+            paramsArr.append(np.asarray([i, tpeak, ampl, fwhm, e_flare, ed_flare])) 
 
+            # compute the flare, add to flux array
             flare = flare_model(t, tpeak, fwhm, ampl)
             new_f += flare
         flareArr[i] = new_f
-    np.savetxt('flareArrs/'+lcfile[:-8]+'flares.npy', flareArr)
-    # also want to save out all the flare parameters: tpeak, energy, ed, ampl, fwhm
+    np.savetxt(flaredir+lcfile[:-8]+'flares.npy', flareArr)
+    np.savetxt(paramdir+lcfile[:-8]+'flareparams.npy', paramsArr)
 
 
-def get_dist_cm(targetid, radius='0.1 arcsec'): # check this radius w someone
+
+def get_dist_cm(targetid, radius='0.1 arcsec'):
+    """
+    Query the TESS Input Catalogue to extract a distance of the input target,
+    and convert the distance from parsec to cm
+
+    Parameters
+    ----------
+    targetid : 
+        Target ID (does it need to be a TIC ID?) for the object of interest
+    radius : str or astropy Quantity object
+        Radius around which to search for target information
+        Default is 0.1 arcsecond.
+    
+    Returns
+    -------
+    dist : float
+        Distance of the target in cm, 
+        approximated by the median value of the distances returned by astroquery search...
+
+    """
     catalog_data = Catalogs.query_object(targetid, catalog="Tic", radius=radius)
-    return np.nanmedian(catalog_data['d'])*3.08568e18 # don't want to hard code to cm. could
+    return np.nanmedian(catalog_data['d'])*3.08568e18 # this is a choice
 
-def _get_random_energy(emin=1e23, emax=1e38, distribution='log-uniform'): # check this range - do we want bolometric 
+def _get_random_energy(emin=1e23, emax=1e38, distribution='log-uniform'):
+    """
+    Draw a flare energy at random from a log-uniform or uniform distribution.
+
+    Parameters
+    ----------
+    emin : float
+        Lower bound for flare energy
+    emax : float
+        Upper bound for flare energy
+    distribution : str
+        Distribution from which to make a random selection, defaulting to log-uniform.
+        'log-uniform', 'uniform'
+    
+    Returns
+    -------
+    E : float
+        Flare energy drawn from the input distribution
+    """
     if distribution == 'log-uniform':
         log_rand_e = uniform(low=np.log10(emin), high=np.log10(emax))
         return 10**log_rand_e
@@ -88,7 +112,7 @@ def energy_to_ed(energy, dist):
     Returns
     -------
     ED : float
-        Equivalent duration of the flare, in seconds
+        Equivalent duration of the flare, measured in seconds
     """
     lum_params = 4*np.pi*dist**2
     return energy / lum_params
@@ -115,14 +139,6 @@ def ampl_to_fwhm(ampl):
     raise NotImplementedError
 
 
-def _prep4inject(f, ferr, zero_center=True):
-    f = f / np.nanmedian(f)
-    ferr = ferr / np.nanmedian(f)
-    if zero_center == True:
-        f -= 1
-    return f, ferr
-
-
 def flare_eqn(t, tpeak, fwhm, ampl):
     '''
     The equation that defines the shape for the Continuous Flare Model
@@ -142,6 +158,7 @@ def flare_eqn(t, tpeak, fwhm, ampl):
         *special.erfc(((B-t)/C)+(C*D1/2)))+((1/2)*np.sqrt(np.pi)*A*C*f2
         *np.exp(-D2*t+((B/C)+(D2*C/2))**2)*special.erfc(((B-t)/C)+(C*D2/2)))
     return eqn*ampl
+
 
 def flare_model(t, tpeak, fwhm, ampl, upsample=False, uptime=10):
     '''
