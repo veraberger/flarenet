@@ -18,7 +18,7 @@ import pdb
 
 
 
-__all__ = ['FlareLightCurve'] 
+__all__ = ['FlareLightCurve']
 
 
 class FlareLightCurve:
@@ -157,3 +157,12 @@ class FlareLightCurve:
         flux_data = np.asarray([padded_flux[idx:idx+n] for idx in
                                  np.arange(0, len(self.flux.value))-n//2])
         return flux_data
+    
+    """
+    do we want a function like 
+    def fill_gaps(self):
+    that finds gaps and linearly interpolates
+    try to do myself unless it's rlly complicated
+    also look at tensorflow and sklearn preprocessing
+    
+    """
