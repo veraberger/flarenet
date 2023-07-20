@@ -6,12 +6,16 @@ from astroquery.mast import Catalogs
 from numpy.random import uniform
 
 
-def flare_generator(lcfile, num_flares=50, flaredir='flareArrs/', paramdir='artificial_flare_params/'):
+def flare_generator(lcfile, iterations=50, fraction_flare=0.3, flaredir='flareArrs/', paramdir='artificial_flare_params/'):
     """
     Take a ticid_orbitnum_data.npy file with time and flux in the first and second column, respectively
     For a given number of iterations, 
     Generate and inject artificial flares into randomized points in the light curve, 
     such that approximately 50% of the timespan is occupied by a flare
+    use fwhm as duration
+    keep injecting until t1/2 sum reaches 30% of the time
+    pre-generate a giant list of possible flare parameters
+    use gunther fwhm/ampl
     """
     # read in the time series
     datafile = np.load(lcfile)
@@ -23,14 +27,16 @@ def flare_generator(lcfile, num_flares=50, flaredir='flareArrs/', paramdir='arti
     f = RobustScaler().fit_transform(f)
 
     # initialize arrays of multi-flare light curves
-    flareArr = np.empty((num_flares, len(f)))
+    # flareArr = np.empty((num_flares, len(f)))
+    flareArr = np.array()
     paramsArr = np.array()
-    
-    for i in range(num_flares):
+
+    for i in range(iterations):
+        fwhm_time = 0
         new_f = np.zeros((1, len(f)))
-        # choose some number of flares to inject during that orbit: one a day to 5 a day + 1 more per day for 20% complex (idk)
-        flares_per_orbit = uniform(14, 84)
-        for i in range(flares_per_orbit):
+        # while summed fwhm times of flares are less than the desired fraction of time of the orbit to be occupied by a flare, 
+        # generate flares & save parameters
+        while fwhm_time < fraction_flare * (t.max() - t.min()):
             # generate artificial flare parameters
             tpeak = uniform(t.min(), t.max())
             # draw a random energy and convert to relative amplitude
@@ -38,16 +44,18 @@ def flare_generator(lcfile, num_flares=50, flaredir='flareArrs/', paramdir='arti
             ed_flare = energy_to_ed(e_flare, get_dist_cm(ticid))
             ampl = ed_to_rel_ampl(ed_flare) # since the flux is normalized and zero-centered, I think we can treat this as The amplitude
             fwhm = ampl_to_fwhm(ampl) # help
+
+            fwhm_time += fwhm 
             
+            # add flare parameters to array
             paramsArr.append(np.asarray([i, tpeak, ampl, fwhm, e_flare, ed_flare])) 
 
-            # compute the flare, add to flux array
-            flare = flare_model(t, tpeak, fwhm, ampl)
+            # compute the flare flux, add to flux array
+            flare = flare_model(t, tpeak, fwhm, ampl) 
             new_f += flare
         flareArr[i] = new_f
-    np.savetxt(flaredir+lcfile[:-8]+'flares.npy', flareArr)
-    np.savetxt(paramdir+lcfile[:-8]+'flareparams.npy', paramsArr)
-
+    np.save(flaredir+lcfile[:-8]+'flares.npy', flareArr)
+    np.save(paramdir+lcfile[:-8]+'flareparams.npy', paramsArr)
 
 
 def get_dist_cm(targetid, radius='0.1 arcsec'):
