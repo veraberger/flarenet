@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.preprocessing import RobustScaler
 from flare_model import * 
 from cosmic_ray_extension import *
+import matplotlib.pyplot as plt
 
 all = ['InputTPF']
 
@@ -88,14 +89,14 @@ class InputTPF(object):
         return np.sqrt(self.pos_corr1**2+self.pos_corr2**2) 
     
     
-    def _tpf_to_cr_lc(self, cr=True):
-        lc = self.to_lightcurve(aperture_mask=self.pipeline_mask)
+    def tpf_to_cr_lc(self, cr=True):
+        lc = self.tpf.to_lightcurve(aperture_mask=self.tpf.pipeline_mask)
         if cr == True:
             if not self.exptime == 20:
                 raise TypeError("Cosmic ray injection is only possible for 20-second datasets.")
-            cosmic_ray_cube = load_cosmicray_extension(self) 
-            tpf_cr = (self+cosmic_ray_cube)
-            lc_cr = tpf_cr.to_lightcurve(aperture_mask=self.pipeline_mask)
+            cosmic_ray_cube = load_cosmicray_extension(self.tpf) 
+            tpf_cr = (self.tpf+cosmic_ray_cube)
+            lc_cr = tpf_cr.to_lightcurve(aperture_mask=self.tpf.pipeline_mask)
             crArr = np.where(lc_cr.flux - lc.flux != 0, 1, 0)
             return lc_cr, crArr
         else: 
@@ -143,17 +144,9 @@ class InputTPF(object):
                 j = j + batch_size
 
 
-
-sr = lk.search_targetpixelfile('TIC 10863087', mission='TESS', author='SPOC', exptime=20, sector=30)
-print(sr)
-lc = sr.download()
-print(lc)
-mytpf = InputTPF(ticid='10863087', sector=30, exptime=20, download_dir='ward/ward_tpfs/')
-print(mytpf)
-print(type(mytpf))
-print('time', mytpf.time)
-print(mytpf.ra)
-print(mytpf.flux_err)
-print(mytpf._get_centroid_shift())
-mytpf._tpf_to_cr_lc() # this does not work because it relies on the lightkurve .to_lightcurve function which I can't use bc my object isn't a lk TPF
-
+# download tpf, convert to LC with cosmic rays, plot LC w/ CRs marked in red
+# mytpf = InputTPF(ticid='10863087', sector=30, exptime=20, download_dir='tpfs/')
+# mylc, crArr = mytpf.tpf_to_cr_lc()
+# plt.plot(mylc.time.value, mylc.flux.value, color='black')
+# plt.plot(mylc.time.value[crArr==1], mylc.flux.value[crArr==1], color='r', marker='o', ls='none')
+# plt.show()
