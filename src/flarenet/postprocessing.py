@@ -5,6 +5,8 @@ from sklearn.preprocessing import RobustScaler
 from flare_model import * 
 from cosmic_ray_extension import *
 import matplotlib.pyplot as plt
+from numpy.random import uniform, normal, choice, randint
+
 
 all = ['InputTPF']
 
@@ -14,37 +16,51 @@ class InputTPF(object):
     extract time series and meta data for input into our model, ...
     """
 
-    def __init__(self, ticid, sector, exptime=20, download_dir='tpfs/'):
+    def __init__(self, ticid, sector, exptime=20, download_dir='tpfs/', cosmic_rays=True, inject_flares=True):
         """
         Download a TPF 
         """
-        self.tpf = InputTPF.download_tpf(ticid, sector, exptime=exptime, download_dir=download_dir)
-        self.targetid = self.tpf.targetid
-        self.time =  self.tpf.time
-        self.flux = self.tpf.flux
-        self.flux_err = self.tpf.flux_err
-        self.exptime = exptime
+        self.targetid = ticid
         self.sector = sector
-        self.ra = self.tpf.ra
-        self.dec = self.tpf.dec
+        self.exptime = exptime # what if someone puts "fast" instead of 20? should i just require that exptime is a number
+        self.tpf, self.lc, self.crArr = InputTPF.download_tpf('TIC '+str(ticid), sector, exptime=exptime, download_dir=download_dir, cr=cosmic_rays)
         self.centroid_col, self.centroid_row = self.tpf.estimate_centroids(aperture_mask='default', method='moments')
-        self.header = self.tpf.get_header()
-        self.tessmag = self.tpf.get_header()['TESSMAG']
-        self.teff = self.tpf.get_header()['TEFF']
-        self.radius = self.tpf.get_header()['RADIUS']
-        self.cdpp1_0 = self.tpf.hdu[1].header['CDPP1_0']
-        self.crowdsap = self.tpf.hdu[1].header['CROWDSAP']
-        self.camera = self.tpf.camera
-        self.ccd = self.tpf.ccd
-        self.logg = self.tpf.get_header()['LOGG']
-        self.pos_corr1 = self.tpf.pos_corr1
-        self.pos_corr2 = self.tpf.pos_corr2
+        self.pos_corr = self._get_pos_corr()
+        self.c_dist = self._get_centroid_shift()
+
 
     @staticmethod
-    def download_tpf(ticid, sector, exptime=20, download_dir='tpfs'):
-        return lk.search_targetpixelfile(ticid, mission='TESS', author='SPOC', exptime=exptime, sector=sector).download(download_dir=download_dir)
+    def download_tpf(ticid, sector, exptime=20, download_dir='tpfs', cr=True):
+        """
 
-    def _get_metadata(self, outdir='/Users/veraberger/nasa/meta_training/'): 
+        """
+       
+        tpf = lk.search_targetpixelfile(ticid, mission='TESS', author='SPOC', exptime=exptime, sector=sector).download(download_dir=download_dir)
+
+        # raise error if there's no file to download
+        if tpf is None:
+            raise ValueError(f"Unable to find data for target ID {ticid} and sector {sector} with {exptime} exposure time.")
+        
+        # this is so messy but I need the original tpf's light curve to compare to the CR light curve and figure out where the CRs are
+        lc = tpf.to_lightcurve(aperture_mask=tpf.pipeline_mask)
+
+        if cr == True:
+            if not exptime == 20:
+                raise TypeError("Cosmic ray injection is only possible for 20-second datasets.")
+            # inject cosmic rays
+            cosmic_ray_cube = load_cosmicray_extension(tpf) 
+            tpf_cr = tpf+cosmic_ray_cube
+            lc_cr = tpf_cr.to_lightcurve(aperture_mask=tpf.pipeline_mask)
+
+            return tpf_cr, lc_cr, np.where(lc_cr.flux - lc.flux != 0, 1, 0)
+        
+        elif cr == False:
+            return tpf, lc, np.zeros(lc.shape)
+        else: 
+            raise ValueError("Not a valid input for cr. Please enter True or False.")
+    
+
+    def get_metadata(self, outdir='/Users/veraberger/nasa/meta_training/'): 
         """ Get relevant metadata from the headers of a TESS TargetPixelFile object
             If outdir is specified, save the array into an .npy file
 
@@ -57,8 +73,8 @@ class InputTPF(object):
         -------
         nothing - do i say that or just leave this blank?
         """
-        metaArr = np.array([self.ra, self.dec,  self.tessmag, self.teff,  self.radius, self.sector, self.cdpp1_0,  self.crowdsap, self.camera, self.ccd,  self.logg])
-        # metaArr = np.array([tpf.ra, tpf.dec,  tpf.get_header()['TESSMAG'], tpf.get_header()['TEFF'],  tpf.get_header()['RADIUS'], tpf.sector, tpf.hdu[1].header['CDPP1_0'],  tpf.hdu[1].header['CROWDSAP'], tpf.camera, tpf.ccd,  tpf.get_header()['LOGG']])
+        # metaArr = np.array([self.ra, self.dec,  self.tessmag, self.teff,  self.radius, self.sector, self.cdpp1_0,  self.crowdsap, self.camera, self.ccd,  self.logg]) 
+        metaArr = np.array([self.tpf.ra, self.tpf.dec,  self.tpf.get_header()['TESSMAG'], self.tpf.get_header()['TEFF'],  self.tpf.get_header()['RADIUS'], self.tpf.sector, self.tpf.hdu[1].header['CDPP1_0'],  self.tpf.hdu[1].header['CROWDSAP'], self.tpf.camera, self.tpf.ccd,  self.tpf.get_header()['LOGG']])
         if outdir is not None:
             np.save(outdir+str(self.targetid)+'_'+str(self.sector)+'_meta.npy', metaArr)
         else:
@@ -84,102 +100,139 @@ class InputTPF(object):
 
     def _get_pos_corr(self):
         # magnitude of vector given by poscorr 1 and 2
-        return np.sqrt(self.pos_corr1**2+self.pos_corr2**2) 
-    
-    def tpf_to_cr_lc(self, cr=True):
+        return np.sqrt(self.tpf.pos_corr1**2+self.tpf.pos_corr2**2) 
+
+        
+    def get_crArr(lc, lc_cr):
         """
-        Create a lightcurve from the target pixel file using lightkurve to_lightcurve,
-        and by default inject cosmic rays originally removed by TESS processing back into the light curve.
+        For a light curve of length n, 
+        create a 1xn array with 1s where a cosmic ray was identified by the TESS pipeline, and 0s otherwise.
         
         Parameters
         ----------
-        cr : bool
-            If True, inject cosmic rays into light curve.
+        lc : lk.LightCurve object 
+            Light curve without CRs injected
+        lc_cr : lk.LightCurve object 
+            Light curve with CRs injected
         
         Returns
         -------
-        lc : TESS lightcurve object
         crArr : array of 0s and 1s marking where in the light curve cosmic rays have been identified
         """
-        lc = self.tpf.to_lightcurve(aperture_mask=self.tpf.pipeline_mask)
-        if cr == True:
-            if not self.exptime == 20:
-                raise TypeError("Cosmic ray injection is only possible for 20-second datasets.")
-            cosmic_ray_cube = load_cosmicray_extension(self.tpf) 
-            tpf_cr = (self.tpf+cosmic_ray_cube)
-            lc_cr = tpf_cr.to_lightcurve(aperture_mask=self.tpf.pipeline_mask)
-            crArr = np.where(lc_cr.flux - lc.flux != 0, 1, 0)
-            return lc_cr, crArr
-        else: 
-            return lc
+        crArr = np.where(lc_cr.flux - lc.flux != 0, 1, 0) # is there a better way to do this?
+        return crArr
 
-    @staticmethod
-    def make_orbit_files(lc, crArr, pos_corr, c_dist,  datadir='data_training_unnorm/'):
+    def make_orbit_files(self, injected_flux, flareArr, datadir='training_data/'):
         """
         Take a light curve and supplemental information for some target and sector, split the data by orbits, 
         Save the output into an npy file. 
 
         Parameters
         ----------
-        lc : Lightkurve.LightCurve object with length n
-        crArr : 1 x n array with 1s when a cosmic ray is identified, and 0s otherwise
-        pos_corr : 1 x n array representing the local motion of the star
-        c_dist : 1 x n array representing the shift of the centroid from its median value over time
         datadir : directory to save orbit data into
         
         Returns
         -------
         """
-        df = pd.DataFrame(data=[lc.time.value, lc.flux.value, lc.flux_err.value, lc.quality.value, pos_corr, c_dist, crArr]).T
+        if injected_flux is None:
+            df = pd.DataFrame(data=[self.lc.time.value, self.lc.flux.value, self.lc.flux_err.value, self.lc.quality.value, self.pos_corr, self.c_dist, self.crArr, np.zeros(self.crArr.shape)]).T
+        else:
+            df = pd.DataFrame(data=[self.lc.time.value, injected_flux, self.lc.flux_err.value, self.lc.quality.value, self.pos_corr, self.c_dist, self.crArr, flareArr]).T
         dt = df[0].diff()
-        gap_index = df.index[dt == dt.max()].item()
+        print(df.columns)
+        gap_index = df.index[dt == dt.max()].item() # also must be a less handwavy to do all this
         orbit1 = df.iloc[:gap_index]
         orbit2 = df.iloc[gap_index:]
-        np.save(datadir+str(lc.targetid)+'_'+str(lc.sector)+'_1_data.npy', np.asarray(orbit1))
-        np.save(datadir+str(lc.targetid)+'_'+str(lc.sector)+'_2_data.npy', np.asarray(orbit2))
+        if datadir is not None:
+            np.save(datadir+str(self.targetid)+'_'+str(self.sector)+'_1_data.npy', np.asarray(orbit1))
+            np.save(datadir+str(self.targetid)+'_'+str(self.sector)+'_2_data.npy', np.asarray(orbit2))
+        return orbit1, orbit2
 
+    def flare_generator(self, all_ampls, all_fwhms, fraction_flare=0.1):
+        """
+        Take time and flux time series 
+        Generate and inject artificial flares into randomized points in the light curve, 
+        such that a desired percentage of the light curve timespan is occupied by a flare
+        keep injecting until t1/2 sum reaches a given fraction of the time
+
+        Parameters
+        ----------
+        all_ampls : ndarray
+            Array of relative amplitudes to draw from
+        all_fwhms : ndarray
+            Array of FWHMs to draw from
+        fraction_flare : float
+            Fraction of the light curve to cover with flares. 
+            This is an approximation, as time covered by overlapping flares will be counted by both
+        
+        Returns
+        -------
+        flare_flux : ndarray
+            Array of flare fluxes with the same length as the input object light curve
+        paramsArr : ndarray
+            Array of parameters for each generated flare
+            [Time of peak, relative amplitude, and FWHM]
+        """
+        paramsArr = np.array([])
+        fwhm_time = 0
+        flare_flux = np.zeros((1, len(self.lc.time)))
+        
+        # while summed fwhm times of flares are less than the desired fraction of time of the orbit to be occupied by a flare, 
+        # generate flares & save parameters
+        while fwhm_time < (fraction_flare * (len(self.lc.time)*0.00023148148)):
+        # while fwhm_time < (fraction_flare * (t.max() - t.min())):
+            # generate artificial flare parameters
+            tpeak = choice(self.lc.time.value)
+            # tpeak = uniform(self.lc.time.value.min(), self.lc.time.value.max()) # random time of peak within the timespan of the light curve
+            rand_ind = randint(0, len(all_ampls)) # get random index for flare parameters
+            ampl = all_ampls[rand_ind]
+            fwhm = all_fwhms[rand_ind]
+
+            fwhm_time += fwhm
+            
+            # add flare parameters to array
+            paramsArr = np.append(paramsArr, np.asarray([tpeak, ampl, fwhm])) 
+
+            # generate the flare, add to flux array
+            flare = flare_model(self.lc.time.value, tpeak, fwhm, ampl)
+            flare = np.nan_to_num(flare)
+            flare_flux = np.add(flare_flux, flare)
+        return flare_flux.flatten(), paramsArr
+    
     @staticmethod
-    def training_data_generator(lc_list, batch_size=32, window_size=100):
-        # here lc_list is a list of filenames in the training set
-        for fname in lc_list:
-            target_data = np.load(fname)
+    def get_flareArr(flare_flux, threshold=0.01):
+        """
+        Get array of 0s and 1s where flare flux is above a given threshold.
+        """
+        return np.where(flare_flux > threshold, 1, 0)
+    
 
-            target_lc = target_data[1] # flux array
-            labels = target_data[7] # flare array 
-
-            lc_length = len(target_lc)
-            valid_indices = np.arange(int(window_size/2), int(lc_length-window_size/2), dtype=int)
-
-            # Note I've shuffled the indices for training so the batch isn't all sampling the same part of the lc
-            # We don't need/want to do this for prediction. This can become an input flag (unless we design a separate generator for the prediction)
-            np.random.shuffle(valid_indices)
-            j = 0 #J loops through the time series for a single target
-            while j+batch_size <= len(valid_indices):
-                data = np.empty((batch_size, window_size, 1))
-                #print(data.shape)
-                label = np.empty((batch_size), dtype=int)
-                for k in range(batch_size):
-                    #print(i, j, k)
-                    X = target_lc[valid_indices[j+k]-int(window_size/2) : valid_indices[j+k]+int(window_size/2)].reshape(window_size,1)
-                    data[k,] = RobustScaler().fit_transform(X)
-                    label[k] = np.asarray(labels[j+k])
-                    #print(data[k,])
-                    #print(label)
-                #print(data.shape, label)
-                yield data, label
-                j = j + batch_size
-
-
-
-
-# # download tpf, convert to LC with cosmic rays, plot LC w/ CRs marked in red
-# mytpf = InputTPF(ticid='TIC 10863087', sector=30, exptime=20, download_dir='/Users/veraberger/nasa/tpfs/')
-# mytpf._get_metadata()
-# mylc, crArr = mytpf.tpf_to_cr_lc()
-# InputTPF.make_orbit_files(mylc, crArr, mytpf._get_pos_corr(), mytpf._get_centroid_shift())
-# print(InputTPF.training_data_generator([]))
-# plt.plot(mylc.time.value, mylc.flux.value, color='black')
-# plt.plot(mylc.time.value[crArr==1], mylc.flux.value[crArr==1], color='r', marker='o', ls='none')
-# plt.show()
+    def inject_flare(self, flare_flux, normalize=True):
+        """
+        Parameters
+        ----------
+        flare_flux : ndarray
+            Array of flare fluxes to inject
+        normalize : bool
+            If True, median-normalize the input light curve
+        
+        Returns
+        -------
+            : ndarray
+            Array of flare fluxes added to light curve
+        """
+        if normalize == True:
+            flare_flux_noisy = normal(flare_flux, scale=(self.lc.flux_err/np.nanmedian(self.lc.flux)), size=flare_flux.shape)
+            # fig, ax = plt.subplots(2, figsize=(13,9), sharex=True)
+            # ax[0].plot(self.lc.time.value, flare_flux_noisy, color='tab:green')
+            # ax[1].plot(self.lc.time.value, flare_flux, color='black')            
+            # plt.show()
+            return(np.add(InputTPF.median_normalize(self.lc.flux.value).flatten(), flare_flux_noisy))
+        else: 
+            flare_flux_noisy = normal(flare_flux, scale=(self.lc.flux_err.value), size=flare_flux.shape)
+            return np.add(self.lc.flux.flatten(), flare_flux_noisy.flatten())
+        # return np.add(lc_flux.flatten(), flare_flux.flatten())
 
 
+    def median_normalize(lc_flux):
+        return (lc_flux - np.nanmedian(lc_flux)) / np.nanmedian(lc_flux)
