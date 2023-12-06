@@ -5,7 +5,7 @@ from flare_model import *
 from cosmic_ray_extension import *
 import matplotlib.pyplot as plt
 from numpy.random import uniform, normal, choice, randint
-
+import tempfile
 
 all = ['TessStar']
 
@@ -18,7 +18,7 @@ class TessStar(object):
     and the .lc attribute is a lightkurve LightCurve object
     """
 
-    def __init__(self, ticid, sector, exptime=20, download_dir='tpfs/', cosmic_rays=True, inject_flares=True):
+    def __init__(self, ticid, sector, exptime=20, download_dir=None, cosmic_rays=True, inject_flares=True):
         """
         Instantiates the object by downloading the TPF through lightkurve 
 
@@ -43,7 +43,7 @@ class TessStar(object):
         self.targetid = ticid
         self.sector = sector
         self.exptime = exptime # what if someone puts "fast" instead of 20? should i just require that exptime is a number
-        self.tpf, self.lc, self.crArr = TessStar.download_tpf(ticid, sector, exptime=exptime, download_dir=download_dir, cr=cosmic_rays)
+        self.tpf, self.lc, self.crArr = TessStar.download_tpf('TIC '+str(ticid), sector, exptime=exptime, download_dir=download_dir, cr=cosmic_rays)
         self.centroid_col, self.centroid_row = self.tpf.estimate_centroids(aperture_mask='default', method='moments')
         self.pos_corr = self._get_pos_corr()
         self.c_dist = self._get_centroid_shift()
@@ -61,12 +61,17 @@ class TessStar(object):
         lc : lightkurve LightCurve object
         crArr : array of zeros and ones corresponding to cosmic ray locations in the lc
         """
-       
-        tpf = lk.search_targetpixelfile(ticid, mission='TESS', author='SPOC', exptime=exptime, sector=sector).download(download_dir=download_dir)
+        # print(ticid)
+               
+        tpf_sr = lk.search_targetpixelfile(ticid, mission='TESS', author='SPOC', exptime=exptime, sector=sector)
+        # print(tpf_sr)
+
 
         # raise error if there's no file to download
-        if tpf is None:
+        if tpf_sr is None:
             raise ValueError(f"Unable to find data for target ID {ticid} and sector {sector} with {exptime} exposure time.")
+        tpf_sr.table["dataURL"] = tpf_sr.table["dataURI"]
+        tpf = tpf_sr.download(download_dir=download_dir)
         
         # this is slightly messy but I need the original tpf's light curve to compare to the CR light curve and figure out where the CRs are
         lc = tpf.to_lightcurve(aperture_mask=tpf.pipeline_mask)
@@ -87,7 +92,7 @@ class TessStar(object):
             raise ValueError("Not a valid input for cr. Please enter True or False.")
     
 
-    def get_metadata(self, outdir='/Users/veraberger/nasa/meta_training/'): 
+    def get_metadata(self, outdir='meta_training/'): 
         """ Get relevant metadata from the headers of a TESS TargetPixelFile object
             If outdir is specified, save the array into an .npy file
 
@@ -135,7 +140,9 @@ class TessStar(object):
         Wait, should this be like the centroid shift? and have the shift from the median?
         """
         # magnitude of vector given by poscorr 1 and 2
-        return np.sqrt(self.tpf.pos_corr1**2+self.tpf.pos_corr2**2) 
+        pc_shift1 = self.tpf.pos_corr1-np.nanmedian(self.tpf.pos_corr1)
+        pc_shift2 = self.tpf.pos_corr2-np.nanmedian(self.tpf.pos_corr2)
+        return np.sqrt(pc_shift1**2+pc_shift2**2)
 
         
     def get_crArr(lc, lc_cr):
