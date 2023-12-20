@@ -11,6 +11,7 @@ Here's an example output of a light curve, color coded by the likelihood that ea
 
 
 **notes:**
+
 -- this project was developed as part of an OSTEM internship at NASA Goddard with the TESS GI team!
 
 -- name suggestions welcome. `flarenet` is not final.
