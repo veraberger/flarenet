@@ -1,7 +1,12 @@
 import numpy as np
 
 """
-how to cite the cosmic ray mitigation tutorial? 
+Unlike other TESS data products, the TESS 20-second target pixel files
+do not have on-board cosmic ray correction. Instead, cosmic rays are identified
+by the pipeline and removed from the data. The removed flux is saved
+in an extension in the FITS file. See https://heasarc.gsfc.nasa.gov/docs/tess/TESS-CosmicRayPrimer.html
+for details
+
 """
 
 

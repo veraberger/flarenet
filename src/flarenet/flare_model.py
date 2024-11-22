@@ -6,9 +6,11 @@ from scipy.stats import binned_statistic
 def flare_eqn(t,tpeak,fwhm,ampl):
     '''
     The equation that defines the shape for the Continuous Flare Model
+    Taken from https://github.com/lupitatovar/Llamaradas-Estelares/
+    See: https://iopscience.iop.org/article/10.3847/1538-3881/ac6fe6#ajac6fe6s4
     '''
     #Values were fit & calculated using MCMC 256 walkers and 30000 steps
-
+    #print(tpeak,fwhm, ampl )
     A,B,C,D1,D2,f1 = [0.9687734504375167,-0.251299705922117,0.22675974948468916,
                       0.15551880775110513,1.2150539528490194,0.12695865022878844]
 
@@ -22,6 +24,9 @@ def flare_eqn(t,tpeak,fwhm,ampl):
     eqn = ((1 / 2) * np.sqrt(np.pi) * A * C * f1 * np.exp(-D1 * t + ((B / C) + (D1 * C / 2)) ** 2)
                         * special.erfc(((B - t) / C) + (C * D1 / 2))) + ((1 / 2) * np.sqrt(np.pi) * A * C * f2
                         * np.exp(-D2 * t+ ((B / C) + (D2 * C / 2)) ** 2) * special.erfc(((B - t) / C) + (C * D2 / 2)))
+    # Can get numerically unstable, so mask out extreme values. 
+    eqn[ eqn < 1e-8] = 0
+    eqn[np.isnan(eqn)] = 0
     return eqn * ampl
 
 def flare_model(t,tpeak, fwhm, ampl, upsample=False, uptime=10):
@@ -51,8 +56,10 @@ def flare_model(t,tpeak, fwhm, ampl, upsample=False, uptime=10):
         A continuous flare template whose shape is defined by the convolution of a Gaussian and double exponential
         and can be parameterized by three parameters: center time (tpeak), FWHM, and ampitude
     '''
+    # TODO: define upsample
 
     t_new = (t-tpeak)/fwhm
+    
 
     if upsample:
         dt = np.nanmedian(np.diff(np.abs(t_new)))

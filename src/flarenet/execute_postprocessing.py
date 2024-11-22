@@ -1,17 +1,129 @@
 import numpy as np
 import pandas as pd
-from astropy.io import ascii
+#from astropy.io import ascii
 
-from postprocessing import *
+from .postprocessing import *
+from .utils import normalize_flux
+from . import PACKAGEDIR
 
 
 # # **** read in gunther flares file for flare parameters ****
-flaredf = ascii.read('supplemental_files/gunther_flares_all.txt')
-all_ampls = flaredf['Amp']
-all_fwhms = flaredf['FWHM']
+# flaredf = ascii.read('supplemental_files/gunther_flares_all.txt')
+# all_ampls = flaredf['Amp']
+# all_fwhms = flaredf['FWHM']
+
+def make_injected_flare_trainingset(num_lcs : int = 1, 
+                                    save_plots : bool = False,
+                                    flare_frac : float = 0.1,
+                                    output_dir : str = "training_data/injected_flares/",
+                                    add_pulsation : bool = False,
+                                    add_rrlyrae : bool = False,
+                                    ):
+    """
+    This function can be used to generate traning data by injecting flares into quiet TESS lightcurves
+    
+    Parameters:
+    -----------
+    num_lcs: int
+        Number of stars to inject flares into. 
+    verbose: bool
+        True prints out information about the processing and provides diagnostic plots 
+    flare_frac: float or list of floats of length num_lcs
+        The fraction of the lightcurve to be covered with flares
+    
+    
+    Returns:
+    -------
+    None; however, the datasets with injected flares will be saved npy files
+    """
+
+    quietdf = pd.read_csv(f"{PACKAGEDIR}/supplemental_files/ids_sectors_quietlcs.txt", sep=' ', header=0, usecols=['TIC', 'sector'])
+    idxs = np.random.choice(len(quietdf), size=num_lcs, replace=False)
+    for ii, idx in enumerate(idxs):
+    #for ii, (id, sector) in enumerate(np.random.choice(zip(quietdf['TIC'], quietdf['sector'])), size=num_lcs, replace=False):
+        id = quietdf.iloc[idx]['TIC']
+        sector = quietdf.iloc[idx]['sector']
+
+        print(f"Creating flares for {id} Sector {sector}")
+
+        mytpf = TessStar(f"TIC {id}", sector=sector, exptime=20, download_dir='tpfs/')
+        mytpf.get_metadata()
+        # inject flares such that approximately <flare_frac> of the LC is covered in flares
+        flares, params = mytpf.generate_flares(flare_fraction=flare_frac) 
+        if not os.path.exists(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params"):
+            os.mkdir(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params")
+        np.save(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/{mytpf.ticid}_{mytpf.sector}_flareparams.npy", params)
+        
+        # get array of 0 (no flare) or 1 (flare)
+        # Threshold is 1 standard deviation BEFORE cosmic rays were added back in
+        threshold = (mytpf.lc_std / np.nanmedian(mytpf.lc.flux)).value
+        #print(f"Threshold: {threshold}")
+        mytpf.get_flareArr(flares, threshold=threshold) 
+
+        mytpf.inject_flares(flares) # inject them onto the lc
+        # Inject a signal mimicing an asteroid moving over the star. 
+        mytpf.inject_asteroid_crossing()
+        if add_pulsation:
+            mytpf.inject_stellar_pulsations()
+        if add_rrlyrae:
+            mytpf.inject_rr_lyrae()
+        if save_plots:
+            fig, ax = plt.subplots(2, figsize=(14,5), sharex=True)
+            ax[0].plot(mytpf.lc.time.value, mytpf.lc.flux.value, color='black')
+            ax[1].plot(mytpf.lc.time.value, mytpf.flux_with_flares, color='tomato')   
+            ax[0].set_title("original lc")  
+            ax[1].set_title("added flares")       
+            plt.savefig(f"{PACKAGEDIR}/training_data/injected_flares/{mytpf.ticid}_addedflares.png")
+            plt.close()
+
+        # split into orbits and save .npy files. code currently splits by largest gap in the data
+        mytpf.make_orbit_files(output_dir=output_dir, plot=save_plots)
 
 
-cols = ['TIC', 'sector']
+
+def make_prediction_dataset(ticid : int, 
+                            sector : int = None,
+                            save_plots : bool = False,
+                            output_dir : str = "prediction_data/" ):
+
+    # If sector not provided, this will just return the first available sector
+    mytpf = TessStar(f"TIC {ticid}", sector=sector, exptime=20, download_dir='tpfs/')
+    mytpf.make_orbit_files(output_dir=output_dir, plot=save_plots)
+
+        
+
+
+def add_flares(target_id, sector, flare_frac, output_dir = None, plot=False):
+    mytpf = TessStar(f"TIC {target_id}", sector=sector, exptime=20, download_dir='tpfs/')
+   #try:
+    mytpf.get_metadata()
+    # inject flares such that 10% of the LC is covered in flares (determined by FWHM, so much more of the lc actually has a flare)
+    flares, params = mytpf.generate_flares(flare_fraction=flare_frac) 
+    if not os.path.exists(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/"):
+        os.mkdir(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/")
+    np.save(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/{mytpf.ticid}_{mytpf.sector}_flareparams.npy", params)
+    
+    # get array of 0 (no flare) or 1 (flare)
+    # Threshold is 1 standard deviation BEFORE cosmic rays were added back in
+    threshold = (mytpf.lc_std / np.nanmedian(mytpf.lc.flux)).value
+    print(f"Threshold: {threshold}")
+    mytpf.get_flareArr(flares, threshold=threshold) 
+
+    mytpf.inject_flares(flares, plot=plot) # inject them onto the lc
+    # split into orbits and save .npy files. code currently splits by largest gap in the data
+    mytpf.make_orbit_files(output_dir=output_dir, plot=plot)
+
+
+
+
+
+    
+    #except: # get rid of this and have it fail gracefully for errors we can anticipate
+    #    print(f"Cannot process file for {target_id}, Sector {sector}") 
+
+
+    
+'''cols = ['TIC', 'sector']
 # read in list of TIC IDs and corresponding sectors for quiet light curves in our trianing set
 quietdf = pd.read_csv('supplemental_files/ids_sectors_quietlcs.txt', sep=' ', header=0, usecols=cols)
 for (id, sector) in zip(quietdf['TIC'], quietdf['sector']):
@@ -21,25 +133,21 @@ for (id, sector) in zip(quietdf['TIC'], quietdf['sector']):
 
     try:
         mytpf.get_metadata()
-        # could probably be more creative and have flares and flareArr of 0s and 1s be made concurrently, and stop generating flares when some % of the points in flareArr have a 1 in them
-        flares, params = mytpf.generate_flares(all_ampls, all_fwhms, fraction_flare=0.1) # inject flares such that 10% of the LC is covered in flares (determined by FWHM, so much more of the lc actually has a flare)
+        # inject flares such that 10% of the LC is covered in flares (determined by FWHM, so much more of the lc actually has a flare)
+        flares, params = mytpf.generate_flares(all_ampls, all_fwhms, fraction_flare=0.1) 
         np.save('artificial_flare_params/'+str(mytpf.targetid)+'_'+str(mytpf.sector)+'_flareparams.npy', params)
+        
+        # get array of 0 (no flare) or 1 (flare)
+        # Threshold is 1 standard deviation BEFORE cosmic rays were added back in
+        flareArr = TessStar.get_flareArr(flares, threshold=(mytpf.lc_std / np.median(mytpf.lc.flux)).value) 
 
-        flareArr = TessStar.get_flareArr(flares, threshold=0.008) # get array of flares of lc length to inject onto the lc
         inj_flux = mytpf.inject_flares(flares) # inject them onto the lc
+        inj_flux_normal = normalize_flux(inj_flux, type='standard')
 
         # split into orbits and save .npy files. code currently splits by greatest gap in the data, not great
         orbit1, orbit2 = mytpf.make_orbit_files(injected_flux=inj_flux, flareArr=flareArr, datadir='training_data/') #
 
-        """
-        # plot injected flares and where flares are marked to exist  
-        print(len(flareArr[flareArr==1])/len(flareArr))
-        fig, ax = plt.subplots(2, figsize=(13,9), sharex=True, sharey=True)
-        ax[0].plot(mytpf.lc.time.value, inj_flux, color='black')
-        ax[0].plot(mytpf.lc[flareArr==1].time.value, inj_flux[flareArr==1], color='red', marker='o', ls='none', markersize=2)
-        ax[1].plot(mytpf.lc.time.value, flares, color='black')
-        plt.show()
-        """
+
     
     except: # get rid of this and have it fail gracefully for errors we can anticipate
         print(id, sector) 
@@ -58,5 +166,6 @@ for (id, sector) in zip(quietdf['TIC'], quietdf['sector']):
     ax[1].plot(mylc.time.value[crArr==1], mylc.flux.value[crArr==1], color='r', marker='o', ls='none')
     plt.show()
     """
+'''
 
-    
+
