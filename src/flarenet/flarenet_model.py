@@ -39,7 +39,7 @@ class flarenet(object):
         if scaling == "MinMax":
             self.transformer = MinMaxScaler()
         elif scaling == 'Robust':
-            self.transformer = RobustScaler()
+            self.transformer = RobustScaler(quantile_range=(5.0, 95.0))
         elif scaling == 'Quantile':
             self.transformer = QuantileTransformer(n_quantiles=self.window_size)
         else:
@@ -167,7 +167,7 @@ class flarenet(object):
 
     # Move this over to postprocessing?
     def _prep_orbits_for_generator(self, orbit, train=True, fname=None):
-        # orbit keys: ['time','flux','flux_err', 'quality','crArr','flux_with_flares','flareArr']
+        # orbit keys: ['time','flux','flux_err', 'quality','cr_flags','flux_with_flares','flare_flags']
         #flux_list = []
         #label_list = []
         
@@ -177,14 +177,14 @@ class flarenet(object):
         if train:
             orbit['flux_with_flares'] = orbit['flux_with_flares'].fillna(np.nanmedian(orbit['flux_with_flares'])) #flux
             flux = orbit['flux_with_flares']
-            orbit['flareArr'] = orbit['flareArr'].fillna(0) #flareArr
-            label = orbit['flareArr']
+            orbit['flare_flags'] = orbit['flare_flags'].fillna(0) #flare_flags
+            label = orbit['flare_flags']
         else:
             orbit['normalized_flux'] = orbit['normalized_flux'].fillna(np.nanmedian(orbit['normalized_flux'])) #flux
             flux = orbit['normalized_flux']
             
-        orbit['crArr'] = orbit['crArr'].fillna(0) #crArr
-        #orbit['flareArr'] = orbit['flareArr'].fillna(0) #flareArr
+        orbit['cr_flags'] = orbit['cr_flags'].fillna(0) #cr_flags
+        #orbit['flare_flags'] = orbit['flare_flags'].fillna(0) #flare_flags
 
 
         if fname is not None:
@@ -201,8 +201,8 @@ class flarenet(object):
                 self.prediction_file = f"{PACKAGEDIR}/prediction_data/nn_input/{fname}.csv"     
 
     
-        orbit.loc[(orbit['crArr'] == 1), 'flareArr'] = 0
-        #label_list.append(orbit['flareArr'].to_numpy())
+        orbit.loc[(orbit['cr_flags'] == 1), 'flare_flags'] = 0
+        #label_list.append(orbit['flare_flags'].to_numpy())
         #flux_list.append(orbit['flux'].to_numpy())
 
         if train:
@@ -250,15 +250,15 @@ class flarenet(object):
                                 'flux':[np.median(orbit['flux'])]*len(new_times),
                                 'flux_err':[np.median(orbit['flux_err'])]*len(new_times),
                                 'quality':[128]*len(new_times),
-                                'crArr': np.zeros(len(new_times)),
+                                'cr_flags': np.zeros(len(new_times)),
                                 'filled': np.ones(len(new_times)),
                                 })
         if train:
             fill_vals['flux_with_flares'] = [np.median(orbit['flux_with_flares'])]*len(new_times)
-            fill_vals['flareArr'] = np.zeros(len(new_times))
+            fill_vals['flare_flags'] = np.zeros(len(new_times))
         else:
             fill_vals['normalized_flux'] = [np.median(orbit['normalized_flux'])]*len(new_times)
-            fill_vals['flareArr'] = np.zeros(len(new_times))
+            fill_vals['flare_flags'] = np.zeros(len(new_times))
 
         
         orbit = pd.concat([orbit, fill_vals]).sort_values(by='time')
@@ -302,43 +302,93 @@ class flarenet(object):
                                 'flux':[np.median(orbit['flux'])]*len(new_times),
                                 'flux_err':[np.median(orbit['flux_err'])]*len(new_times),
                                 'quality':[128]*len(new_times),
-                                'crArr': np.zeros(len(new_times)),
+                                'cr_flags': np.zeros(len(new_times)),
                                 'filled': np.ones(len(new_times)),
                                 })
         if train:
             fill_vals['flux_with_flares'] = [np.median(orbit['flux_with_flares'])]*len(new_times)
-            fill_vals['flareArr'] = np.zeros(len(new_times))
+            fill_vals['flare_flags'] = np.zeros(len(new_times))
         else:
             fill_vals['normalized_flux'] = [np.median(orbit['normalized_flux'])]*len(new_times)
-            fill_vals['flareArr'] = np.zeros(len(new_times)) 
+            fill_vals['flare_flags'] = np.zeros(len(new_times)) 
         
         orbit = pd.concat([orbit, fill_vals]).sort_values(by='time')
 
         return orbit
+    
+    def visualize_input(self, file=None, train=True, batch_size=32):
+        if file == None:
+            file = self.training_files[0]
+
+        if isinstance(file, bytes):
+            file = file.decode('utf-8')
+
+        
+        target_data = pd.read_csv(file, index_col=False)
+        
+        target_lc, labels = self._prep_orbits_for_generator(target_data, 
+                                            fname=file.split('/')[-1].split('.')[0],
+                                            train=train
+                                            )
+        
+        
+        lc_length = len(target_lc)
+        valid_indices = np.arange(int(self.window_size/2), int(lc_length-self.window_size/2), dtype=int)
+        # When training, make sure to balance the total number of flare and non-flare samples
+        
+        valid_labels = labels[valid_indices]
+        flare_indices = valid_indices[valid_labels==1]
+        nonflare_indices = valid_indices[valid_labels==0]
+        n_samples =  int(math.floor(min(len(nonflare_indices), len(flare_indices))) * 0.5)
+        print(f"Samples of minority class samples: {n_samples}")
+        print(f"Total Samples: {len(valid_labels)}")
+        valid_flare_indices = np.random.choice(flare_indices, size=n_samples, replace=False)
+        valid_nonflare_indices = np.random.choice(nonflare_indices, size=n_samples, replace=False)
+        valid_indices = np.concatenate((valid_flare_indices, valid_nonflare_indices))
+        np.random.shuffle(valid_indices)
+        print(f"Valid indices: {len(valid_indices)}")
+        
+        fig, ax = plt.subplots(1, figsize=(10,4))
+        #colors = ['blue' if label == 0 else 'red' for label in labels]
+        ax.scatter(np.arange(len(target_lc)), target_lc, c= labels, s=1)
+        plt.ylim(-5,5)
+        plt.show()
+
+        fig, ax = plt.subplots(int(batch_size/2), 2, figsize=(10,36))
+        
+        for j, idx in enumerate(valid_indices[:int(batch_size)]):
+            if self.transformer != None:
+                ax.flatten()[j].scatter(np.arange(self.window_size), self.transformer.fit_transform(target_lc[idx-int(self.window_size/2) : idx+int(self.window_size/2)].reshape(self.window_size,1)), c=labels[idx-int(self.window_size/2) : idx+int(self.window_size/2)], s=2)
+            else:
+                ax.flatten()[j].scatter(np.arange(self.window_size), target_lc[idx-int(self.window_size/2) : idx+int(self.window_size/2)], c=labels[idx-int(self.window_size/2) : idx+int(self.window_size/2)], s=2)
+            ax.flatten()[j].set_title(f"Flare label: {labels[idx]}")
+        plt.tight_layout()
+        plt.show()
 
 
     def build_nn_model(self):
-        # Define a basic ML that we can use to make sure we know the data is being imported correctly
+        """
+        Defines a basic Tensorflow keras model 
     
-        # There is 1 input light curve. In this case, we're just looking at the flux 1D time series
+        There is 1 input light curve. In this case, we're just looking at the flux 1D time series"""
         inputA = keras.layers.Input(shape=(self.window_size,1), name='inputA') # flux lc
 
         # Convolutions on the flux lightcurve
-        A = keras.layers.Conv1D(filters=32, kernel_size=21, padding="causal", activation='relu')(inputA)
-        A = keras.layers.Conv1D(filters=32, kernel_size=21, padding="causal", activation='relu')(A)
-        A = keras.layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(A)
-        A = keras.layers.Dropout(0.2)(A)
+        A = keras.layers.Conv1D(filters=16, kernel_size=15, padding="causal", activation='leaky_relu')(inputA)
+        A = keras.layers.Conv1D(filters=16, kernel_size=15, padding="causal", activation='leaky_relu')(A)
+        A = keras.layers.MaxPooling1D(pool_size=2, strides=1, padding='same')(A)
+        A = keras.layers.Dropout(0.4)(A)
         # A = keras.layers.BatchNormalization()(A) # check on if these just need to be at the end
         # 2
-        A = keras.layers.Conv1D(filters=64, kernel_size=7, padding="causal", activation='relu')(A)
-        A = keras.layers.Conv1D(filters=64, kernel_size=7, padding="causal", activation='relu')(A)
-        A = keras.layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(A)
-        A = keras.layers.Dropout(0.2)(A)
+        A = keras.layers.Conv1D(filters=16, kernel_size=11, padding="causal", activation='leaky_relu')(A)
+        A = keras.layers.Conv1D(filters=16, kernel_size=11, padding="causal", activation='leaky_relu')(A)
+        A = keras.layers.MaxPooling1D(pool_size=2, strides=1, padding='same')(A)
+        A = keras.layers.Dropout(0.4)(A)
 
-        A = keras.layers.Conv1D(filters=64, kernel_size=3, padding="causal", activation='relu')(A)
-        A = keras.layers.Conv1D(filters=64, kernel_size=3, padding="causal", activation='relu')(A)
-        A = keras.layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(A)
-        A = keras.layers.Dropout(0.2)(A)
+        A = keras.layers.Conv1D(filters=16, kernel_size=7, padding="causal", activation='leaky_relu')(A)
+        A = keras.layers.Conv1D(filters=16, kernel_size=7, padding="causal", activation='leaky_relu')(A)
+        A = keras.layers.MaxPooling1D(pool_size=2, strides=1, padding='same')(A)
+        A = keras.layers.Dropout(0.4)(A)
         A = keras.layers.BatchNormalization()(A)
 
 
@@ -352,9 +402,9 @@ class flarenet(object):
 
         # Final fully connected layers to make the prediction
         # Note that the final layer has an output shape of 1. This is because it will be a single prediction between 0 and 1
-        F = keras.layers.Dense(512, activation='relu', kernel_initializer='he_normal')(A.output) # look at size of input to this layer, if smaller than 512 maybe make 512 smaller. look at what stella does too
+        F = keras.layers.Dense(64, activation='leaky_relu', kernel_initializer='he_normal')(A.output) # look at size of input to this layer, if smaller than 512 maybe make 512 smaller. look at what stella does too
         F = keras.layers.Dropout(0.2)(F)
-        F = keras.layers.Dense(256, activation='relu', kernel_initializer='he_normal')(F)
+        F = keras.layers.Dense(32, activation='leaky_relu', kernel_initializer='he_normal')(F)
         F = keras.layers.Dropout(0.2)(F)
         F = keras.layers.Dense(1, activation='sigmoid')(F)
         # keep the relu -> sigmoid
@@ -364,7 +414,7 @@ class flarenet(object):
         # multi_layer_model = keras.models.Model(inputs=(inputA), outputs=(F))
 
         multi_layer_model.compile(
-        optimizer=keras.optimizers.Adamax(learning_rate=0.001),
+        optimizer=keras.optimizers.Adamax(learning_rate=0.0005),
         loss="binary_crossentropy",
         metrics=["accuracy"],
         )

@@ -1,18 +1,19 @@
 import numpy as np
-import os
+#import os
 import lightkurve as lk
 import pandas as pd
 from .flare_model import * 
 #from .cosmic_ray_extension import *
 from .utils import *
 import matplotlib.pyplot as plt
-from numpy.random import uniform, normal, choice, randint
+from numpy.random import choice, randint
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
-import tempfile
-from typing import Union, Optional
+#import tempfile
+from typing import Union
 import warnings
 from . import PACKAGEDIR
+import lksearch
 
 all = ['TessStar']
 
@@ -31,7 +32,7 @@ class TessStar(object):
                  exptime : Union[int, float] = 20, 
                  download_dir : str = None, 
                  add_cosmic_rays : bool = True, 
-                 
+                 cloud : bool = False,
                  ):
         """
         Instantiates the object by downloading the TPF through lightkurve 
@@ -52,13 +53,15 @@ class TessStar(object):
             Defaults to True.
         flare_fraction : float
             If add_flares = True, specifies the fraction of the lightcurve that should have flares
+        cloud : bool
+            If true, download TPF files from the cloud storage location
     
         """
         self.ticid = ticid
         self.sector = sector
         self.exptime = exptime 
         self.add_cosmic_rays = add_cosmic_rays
-        self.tpf, self.lc, self.crArr = self._get_TESS_data(download_dir=download_dir)
+        self.tpf, self.lc, self.cr_flags = self._get_TESS_data(download_dir=download_dir, cloud=cloud)
 
 
 
@@ -66,7 +69,9 @@ class TessStar(object):
     #@staticmethod
     #TODO: turn back into a static method?
     def _get_TESS_data(self,
-                     download_dir: str = 'TPFs'):
+                     download_dir: str = 'TPFs',
+                     cloud : bool = False
+                      ):
         """
         Downloads a TPF using lightkurve, optionally injects cosmic rays, 
         computes a light curve, and returns each.
@@ -75,10 +80,14 @@ class TessStar(object):
         -------
         tpf : lightkurve TESSTargetPixelFile object
         lc : lightkurve LightCurve object
-        crArr : array of zeros and ones corresponding to cosmic ray locations in the lc
+        cr_flags : array of zeros and ones corresponding to cosmic ray locations in the lc
         """
-        
-        tpf = download_tpf(self.ticid, sector = self.sector, exptime = self.exptime, download_dir = download_dir)
+        if cloud == True:
+            cloud_uri = lksearch.TESSSearch(self.ticid, sector=self.sector, exptime=self.exptime, pipeline='SPOC').cubedata.cloud_uris
+            tpf = lk.io.read(cloud_uri[0])
+        else:
+            local_path = lksearch.TESSSearch(self.ticid, sector=self.sector, exptime=self.exptime, pipeline='SPOC').cubedata.download(download_dir=download_dir)['Local Path'][0]
+            tpf = lk.io.read(local_path)
         
         # this is slightly messy but I need the original tpf's light curve to compare to the CR light curve and figure out where the CRs are
         lc = tpf.to_lightcurve(aperture_mask=tpf.pipeline_mask)
@@ -99,6 +108,8 @@ class TessStar(object):
         
         else: 
             return tpf, lc, np.zeros(lc.flux.value.shape)
+
+
     
 
     def get_metadata(self): 
@@ -135,31 +146,12 @@ class TessStar(object):
 
 
 
-        
-    def get_crArr(lc, lc_cr):
-        """
-        For a light curve of length n, 
-        create a 1xn array with '1's where a cosmic ray was identified by the TESS pipeline, 
-        and '0's otherwise.
-        
-        Parameters
-        ----------
-        lc : lk.LightCurve object 
-            Light curve without Cosmic Rays injected
-        lc_cr : lk.LightCurve object 
-            Light curve with Cosmic Rays injected
-        
-        Returns
-        -------
-        crArr : array of 0s and 1s marking which cadences in the light curve cosmic 
-        rays have been identified
-        """
-
-        return np.where(lc_cr.flux - lc.flux != 0, 1, 0)
 
 
     def generate_flares(self, 
-                        flare_fraction : float = 0.1): 
+                        #flare_fraction : float = None,
+                        num_flares : int = 100,
+                        ): 
         """
         Take time and flux time series 
         Generate and inject artificial flares into randomized points in the light curve, 
@@ -189,15 +181,17 @@ class TessStar(object):
         all_ampls = flaredf['Amp']
         all_fwhms = flaredf['FWHM']
 
-        if ((flare_fraction <0) | (flare_fraction > 1)):
-            raise ValueError("fraction_flare must be a value between 0 and 1.")
+        #if ((flare_fraction <0) | (flare_fraction > 1)):
+        #    raise ValueError("fraction_flare must be a value between 0 and 1.")
         
         paramsArr = np.array([])
         flare_time = 0
         flare_flux = np.zeros(len(self.lc.time))
 
 
-        while flare_time < (flare_fraction * (len(self.lc.time)*(self.exptime / 24 / 60 / 60))): 
+        #while flare_time < (flare_fraction * (len(self.lc.time)*(self.exptime / 24 / 60 / 60))): 
+        nf = 0
+        while nf < num_flares:
             # generate artificial flare parameters
             tpeak = choice(self.lc.time.value)
             
@@ -215,10 +209,13 @@ class TessStar(object):
             flare = np.nan_to_num(flare)
             #flare_flux = np.add(flare_flux, flare)
             flare_flux += flare
+            nf += 1
+        
+
 
         return flare_flux, paramsArr
     
-    def get_flareArr(self,
+    def get_flare_flags(self,
                     flare_flux,
                     threshold=0.01):
         """
@@ -237,8 +234,9 @@ class TessStar(object):
         
         """
         #print(flare_flux)
-        self.flareArr = np.where(flare_flux > threshold, 1, 0)
-        return np.where(flare_flux > threshold, 1, 0)
+        flare_flag = np.where(flare_flux > threshold, 1, 0)
+        self.flare_flag = flare_flag
+        #return flare_flag
     
 
     def inject_flares(self, 
@@ -279,14 +277,13 @@ class TessStar(object):
     
     def inject_stellar_pulsations(self):
         periods = np.random.uniform(0.1, 5, size=3)
-        amplitudes = np.random.uniform(0.01, 0.1, size=3)
+        amplitudes = np.random.uniform(0.01, 0.2, size=3)
         phases = np.random.uniform(0, 2*np.pi, size=3)
 
         signal = np.zeros_like(self.lc.time.value)
         for period, amplitude, phase in zip(periods, amplitudes, phases):
             signal += amplitude * np.sin(2 * np.pi * (self.lc.time.value / period + phase))
-        signal = 1 + signal
-        signal /= np.median(signal)
+        signal /= (1 + np.median(signal))
         self.flux_with_flares = self.flux_with_flares + signal
 
     def inject_rr_lyrae(self):
@@ -316,16 +313,16 @@ class TessStar(object):
         # Add some asymmetry and non-linearity to make it more realistic
         signal = signal - 0.1 * amplitude * np.sin(4 * np.pi * phase)
         # Normalize around 1
-        signal = signal / np.median(signal) + 1
-        self.flux_with_flares = self.flux_with_flares + signal
+        signal /= np.median(signal)
+        self.flux_with_flares = self.flux_with_flares + signal - 1
 
         
     
     
     def make_orbit_files(self, 
                          #injected_flux=None, 
-                         #flareArr=None, 
                          output_dir='training_data/',
+                         extra_fname_descriptor='',
                          plot=False):
         """
         Take a light curve and supplemental information for some target and sector, split the data by orbits, 
@@ -334,8 +331,7 @@ class TessStar(object):
         Parameters
         ----------
         injected_flux : array
-        flareArr : array
-            Array of zeros and ones corresponding to 
+
         datadir : directory to save orbit data into
         
         Returns
@@ -346,15 +342,15 @@ class TessStar(object):
         # https://tess.mit.edu/public/files/TESS_FFI_observation_times.csv
         # Instead of treating each orbit separately, do we just want to split anytime there is a gap greater than X time?
 
-        if not hasattr(self, 'flareArr'):
-            df = pd.DataFrame(data=[self.lc.time.value, self.lc.flux.value, self.lc.flux_err.value, self.lc.quality.value, self.crArr, self.normalize(self.lc.flux.value, norm_type='standard')],
-                              index=['time','flux','flux_err', 'quality','crArr', 'normalized_flux']).T
-            #df.rename(columns=['time','flux','flux_err', 'quality','pos_corr','c_dist','crArr','flareArr','lc_flux'], inplace=True)
+        if not hasattr(self, 'flare_flags'):
+            df = pd.DataFrame(data=[self.lc.time.value, self.lc.flux.value, self.lc.flux_err.value, self.lc.quality.value, self.cr_flags, self.normalize(self.lc.flux.value, norm_type='standard')],
+                              index=['time','flux','flux_err', 'quality','cr_flags', 'normalized_flux']).T
+            #df.rename(columns=['time','flux','flux_err', 'quality','pos_corr','c_dist','cr_flags','flare_flags','lc_flux'], inplace=True)
         else:
-            df = pd.DataFrame(data=[self.lc.time.value, self.lc.flux.value, self.lc.flux_err.value, self.lc.quality.value, self.crArr, self.flux_with_flares, self.flareArr],
-                              index=['time','flux','flux_err', 'quality','crArr','flux_with_flares','flareArr']).T
+            df = pd.DataFrame(data=[self.lc.time.value, self.lc.flux.value, self.lc.flux_err.value, self.lc.quality.value, self.cr_flags, self.flux_with_flares, self.flare_flags],
+                              index=['time','flux','flux_err', 'quality','cr_flags','flux_with_flares','flare_flags']).T
 
-            #df.rename(columns=['time','flux','flux_err', 'quality','pos_corr', 'c_dist','crArr','flareArr','lc_injected_flares'], inplace=True)
+            #df.rename(columns=['time','flux','flux_err', 'quality','pos_corr', 'c_dist','cr_flags','flare_flags','lc_injected_flares'], inplace=True)
         dt = df['time'].diff()
         gap_index = df.index[dt == dt.max()].item() # also must be a less handwavy to do all this
         orbit1 = df.iloc[:gap_index]
@@ -364,19 +360,19 @@ class TessStar(object):
         #        os.mkdir(datadir)
             
             # could save pandas dataframe, but they take almost 2x more memory
-        orbit1.to_csv(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_1_data.csv", index=False)
-        orbit2.to_csv(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_2_data.csv", index=False)
+        orbit1.to_csv(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_1_data{extra_fname_descriptor}.csv", index=False)
+        orbit2.to_csv(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_2_data{extra_fname_descriptor}.csv", index=False)
             #np.save(datadir+str(self.ticid)+'_'+str(self.sector)+'_1_data.npy', np.asarray(orbit1))
             #np.save(datadir+str(self.ticid)+'_'+str(self.sector)+'_2_data.npy', np.asarray(orbit2))
         
-        if plot and hasattr(self, 'flareArr'):
+        if plot and hasattr(self, 'flare_flags'):
             fig, ax = plt.subplots(2, figsize=(14,5))
-            ax[0].scatter(orbit1['time'], orbit1['flux_with_flares'], c=orbit1['flareArr'].values, s=2)
-            ax[1].scatter(orbit2['time'], orbit2['flux_with_flares'], c=orbit2['flareArr'].values, s=2)
+            ax[0].scatter(orbit1['time'], orbit1['flux_with_flares'], c=orbit1['flare_flags'].values, s=2)
+            ax[1].scatter(orbit2['time'], orbit2['flux_with_flares'], c=orbit2['flare_flags'].values, s=2)
             ax[0].set_title("orbit 1")
             ax[1].set_title("orbit 2") 
 
-            plt.savefig(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_orbits.png")
+            plt.savefig(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_orbits{extra_fname_descriptor}.png")
             plt.close()
 
 

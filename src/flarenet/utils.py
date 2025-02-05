@@ -1,37 +1,8 @@
 import numpy as np
-import lightkurve as lk
+#import lightkurve as lk
 import warnings
 
 
-
-def download_tpf(
-        ticid : str, 
-        sector : int = None,
-        exptime : int = 20, 
-        download_dir: str = 'TPFs'):
-    """
-    Downloads a TPF using lightkurve, injects cosmic rays by default, computes a light curve,
-    and returns each.
-
-    Parameters
-    ----------
-    ticid : TIC ID of the target star, eg "TIC 261136679"
-    sector : Observing sector for the target
-    exptime : observation exposure time
-
-    
-    Returns
-    -------
-    tpf : lightkurve TESSTargetPixelFile object
-
-    """  
-    tpf_sr = lk.search_targetpixelfile(ticid, mission='TESS', author='SPOC', exptime=exptime, sector=sector)
-    # raise error if there's no file to download
-    if len(tpf_sr.table) == 0:
-        raise ValueError(f"Unable to find data for target ID {ticid} and sector {sector} with {exptime} exposure time.")
-    tpf_sr.table["dataURL"] = tpf_sr.table["dataURI"]
-    tpf = tpf_sr.download(download_dir=download_dir)
-    return tpf
 
 
 
