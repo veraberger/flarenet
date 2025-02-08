@@ -47,7 +47,7 @@ class flarenet(object):
 
 
     
-    def create_training_dataset(self, 
+    def create_training_generator(self, 
                                 data_dir : str,
                                 drop_frac=0.1, 
                                 
@@ -69,14 +69,14 @@ class flarenet(object):
             )
         )
 
-    def create_prediction_dataset(self,
+    def create_prediction_generator(self,
                                   fname : str, 
                                   #data_dir : str,
                                   ):
          #glob.glob(f"{PACKAGEDIR}/{data_dir}/*.csv")
         
         print(f"Making predictions for {fname} ")
-        self.prediction_dataset = tf.data.Dataset.from_generator(
+        self.prediction_generator = tf.data.Dataset.from_generator(
             lambda: self._prepare_prediction_generator(fname),
             output_signature=(
                 {
@@ -171,17 +171,16 @@ class flarenet(object):
         #flux_list = []
         #label_list = []
         
+
         orbit = self._fill_gaps(orbit, train=train)
         orbit = self._pad(orbit, train=train)
 
+        orbit['flux'] = orbit['flux'].fillna(np.nanmedian(orbit['flux'])) #flux
+        flux = orbit['flux']
         if train:
-            orbit['flux_with_flares'] = orbit['flux_with_flares'].fillna(np.nanmedian(orbit['flux_with_flares'])) #flux
-            flux = orbit['flux_with_flares']
             orbit['flare_flags'] = orbit['flare_flags'].fillna(0) #flare_flags
             label = orbit['flare_flags']
-        else:
-            orbit['normalized_flux'] = orbit['normalized_flux'].fillna(np.nanmedian(orbit['normalized_flux'])) #flux
-            flux = orbit['normalized_flux']
+
             
         orbit['cr_flags'] = orbit['cr_flags'].fillna(0) #cr_flags
         #orbit['flare_flags'] = orbit['flare_flags'].fillna(0) #flare_flags
@@ -198,7 +197,9 @@ class flarenet(object):
                 if not os.path.exists(f"{PACKAGEDIR}/prediction_data/nn_input/"):
                     os.makedirs(f"{PACKAGEDIR}/prediction_data/nn_input/")
                 orbit.to_csv(f"{PACKAGEDIR}/prediction_data/nn_input/{fname}.csv")     
-                self.prediction_file = f"{PACKAGEDIR}/prediction_data/nn_input/{fname}.csv"     
+                self.prediction_file = f"{PACKAGEDIR}/prediction_data/nn_input/{fname}.csv"   
+          
+ 
 
     
         orbit.loc[(orbit['cr_flags'] == 1), 'flare_flags'] = 0
@@ -253,12 +254,9 @@ class flarenet(object):
                                 'cr_flags': np.zeros(len(new_times)),
                                 'filled': np.ones(len(new_times)),
                                 })
-        if train:
-            fill_vals['flux_with_flares'] = [np.median(orbit['flux_with_flares'])]*len(new_times)
-            fill_vals['flare_flags'] = np.zeros(len(new_times))
-        else:
-            fill_vals['normalized_flux'] = [np.median(orbit['normalized_flux'])]*len(new_times)
-            fill_vals['flare_flags'] = np.zeros(len(new_times))
+
+        fill_vals['flux'] = [np.median(orbit['flux'])]*len(new_times)
+        fill_vals['flare_flags'] = np.zeros(len(new_times))
 
         
         orbit = pd.concat([orbit, fill_vals]).sort_values(by='time')
@@ -305,12 +303,10 @@ class flarenet(object):
                                 'cr_flags': np.zeros(len(new_times)),
                                 'filled': np.ones(len(new_times)),
                                 })
-        if train:
-            fill_vals['flux_with_flares'] = [np.median(orbit['flux_with_flares'])]*len(new_times)
-            fill_vals['flare_flags'] = np.zeros(len(new_times))
-        else:
-            fill_vals['normalized_flux'] = [np.median(orbit['normalized_flux'])]*len(new_times)
-            fill_vals['flare_flags'] = np.zeros(len(new_times)) 
+
+        fill_vals['flux'] = [np.median(orbit['flux'])]*len(new_times)
+        fill_vals['flare_flags'] = np.zeros(len(new_times))
+
         
         orbit = pd.concat([orbit, fill_vals]).sort_values(by='time')
 
@@ -456,29 +452,38 @@ class flarenet(object):
     
 
 
-    def predict_with_model(self,
+    def predict(self,
+                        fname : str,
                         model : str = None,
                         ):
 
-        if not hasattr(self, 'prediction_dataset'):
+        '''if not hasattr(self, 'prediction_dataset'):
             "You must create a dataset before making predictions. See self.create_prediction_dataset"
-            return
+            return'''
+        self.create_prediction_generator(fname)
+        
         
         if isinstance(model, str):
             print(f"Loading model from {model}")
             self.model = tf.keras.models.load_model(model)
-            
-            preds = self.model.predict(self.prediction_dataset)
-            self.preds = preds.flatten()
-        
+
         elif model == None:
             if not hasattr(self, 'history'):
-                "It doesn't look like you have a trained model available. "
-            else:
-                preds = self.model.predict(self.prediction_dataset)
-                return preds.flatten()
-            
+                print("It doesn't look like you have a trained model available. ")
+
+
         else:
             print("Model input not valid")
+            return
+        
+        preds = self.model.predict(self.prediction_generator)
+        preds = np.pad(preds.flatten(), (int(self.window_size/2),int(self.window_size/2)), 'constant', constant_values=(0))
+
+        prediction_df = pd.read_csv(self.prediction_file, index_col=0)
+        prediction_df['model_prediction'] = preds
+        prediction_df = prediction_df[prediction_df['filled'] == 0].reset_index(drop=True)
+        prediction_df.drop(columns=['filled'], inplace=True)
+
+        return prediction_df
             
         

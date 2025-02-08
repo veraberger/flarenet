@@ -1,7 +1,9 @@
 import numpy as np
 from scipy import special
 from scipy.stats import binned_statistic
-
+from . import PACKAGEDIR
+from astropy.io import ascii
+from numpy.random import choice, randint
 
 def flare_eqn(t,tpeak,fwhm,ampl):
     '''
@@ -76,3 +78,87 @@ def flare_model(t,tpeak, fwhm, ampl, upsample=False, uptime=10):
         flare = flare_eqn(t_new,tpeak,fwhm,ampl)
 
     return flare
+
+def generate_flares(
+                    time_arr,
+                    num_flares : int = 100,
+                    ): 
+    """
+    Take time and flux time series 
+    Generate and inject artificial flares into randomized points in the light curve, 
+    such that a desired percentage of the light curve timespan is occupied by a flare
+    keep injecting until t1/2 sum reaches a given fraction of the time
+
+    Parameters
+    ----------
+    all_ampls : ndarray
+        Array of relative amplitudes to draw from
+    all_fwhms : ndarray
+        Array of FWHMs to draw from
+    fraction_flare : float
+        Fraction of the light curve to cover with flares, between 0 and 1. 
+        This is an approximation, as time covered by overlapping flares will be counted by both
+    
+    Returns
+    -------
+    flare_flux : ndarray
+        Array of flare fluxes with the same length as the input object light curve
+    paramsArr : ndarray
+        Array of parameters for each generated flare
+        [Time of peak, relative amplitude, and FWHM]
+    """
+    # # **** read in gunther flares file for flare parameters ****
+    flaredf = ascii.read(f"{PACKAGEDIR}/supplemental_files/gunther_flares_all.txt")
+    all_ampls = flaredf['Amp']
+    all_fwhms = flaredf['FWHM']
+
+    #if ((flare_fraction <0) | (flare_fraction > 1)):
+    #    raise ValueError("fraction_flare must be a value between 0 and 1.")
+    
+    paramsArr = np.array([])
+    flare_time = 0
+    flare_flux = np.zeros(len(time_arr))
+
+
+    nf = 0
+    while nf < num_flares:
+        # generate artificial flare parameters
+        tpeak = choice(time_arr)
+        
+        rand_ind = randint(0, len(all_ampls)) # get random index for flare parameters
+        ampl = all_ampls[rand_ind]
+        fwhm = all_fwhms[rand_ind]
+
+        
+        # add flare parameters to array
+        paramsArr = np.append(paramsArr, np.asarray([tpeak, ampl, fwhm])) 
+        # generate the flare, add to flux array
+        flare = flare_model(time_arr, tpeak, fwhm, ampl)
+        flare = np.nan_to_num(flare)
+        flare_flux += flare
+        nf += 1
+    
+
+
+    return flare_flux, paramsArr
+
+def get_flare_flags(self,
+                flare_flux,
+                threshold=0.01):
+    """
+    Creates an array of 0s and 1s where the input flux is above a given threshold.
+
+    Parameters
+    ----------
+    flare_flux : ndarray
+        Array of flare fluxes
+    threshold : float
+        Value above which flux is considered to be part of a flare
+    Returns
+    -------
+        : array
+        Array of 1s where flux is high enough to be considered part of a flare; 0s otherwise
+    
+    """
+    flare_flags = np.where(flare_flux > threshold, 1, 0)
+    return flare_flags

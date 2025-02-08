@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 #from astropy.io import ascii
 import os
+from .flare_model import generate_flares
 from .postprocessing import *
-from .utils import normalize_flux
+from .utils import *
 from . import PACKAGEDIR
 
 
@@ -12,15 +13,15 @@ from . import PACKAGEDIR
 # all_ampls = flaredf['Amp']
 # all_fwhms = flaredf['FWHM']
 
-def make_injected_flare_trainingset(num_lcs : int = 1, 
-                                    save_plots : bool = False,
-                                    #flare_frac : float = 0.1,
-                                    num_flares : int = 100,
-                                    output_dir : str = "training_data/injected_flares",
-                                    add_pulsation : bool = False,
-                                    add_rrlyrae : bool = False,
-                                    cloud : bool = False, 
-                                    ):
+def create_trainingset(num_lcs : int = 1, 
+                    save_plots : bool = False,
+                    #flare_frac : float = 0.1,
+                    num_flares : int = 100,
+                    output_dir : str = "training_data/injected_flares",
+                    add_pulsation : bool = False,
+                    add_rrlyrae : bool = False,
+                    cloud : bool = False, 
+                    ):
     """
     This function can be used to generate traning data by injecting flares into quiet TESS lightcurves
     
@@ -58,7 +59,8 @@ def make_injected_flare_trainingset(num_lcs : int = 1,
         mytpf = TessStar(f"TIC {id}", sector=sector, exptime=20, download_dir='tpfs/', cloud = cloud)
         mytpf.get_metadata()
         # inject flares such that approximately <flare_frac> of the LC is covered in flares
-        flares, params = mytpf.generate_flares(num_flares = num_flares) 
+        flares, params = generate_flares(mytpf.lc.time.value, num_flares = num_flares) 
+
         if not os.path.exists(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params"):
             os.mkdir(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params")
         np.save(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/{mytpf.ticid}_{mytpf.sector}{extra_fname}_flareparams.npy", params)
@@ -67,37 +69,38 @@ def make_injected_flare_trainingset(num_lcs : int = 1,
         # Threshold is 1 standard deviation BEFORE cosmic rays were added back in
         threshold = (mytpf.lc_std / np.nanmedian(mytpf.lc.flux)).value
         #print(f"Threshold: {threshold}")
-        
-        mytpf.flare_flags = np.where(flares > threshold, 1, 0)
+
+        flare_flags = np.where(flares > threshold, 1, 0)
         #mytpf.get_flare_flags(flares, threshold=threshold) 
 
-        mytpf.inject_flares(flares) # inject them onto the lc
-        # Inject a signal mimicing an asteroid moving over the star. 
-        mytpf.inject_asteroid_crossing()
+        modified_flux = inject_flares(flares, mytpf.lc.flux.value) # inject them onto the lc
+        # Inject one signal mimicing an asteroid moving over the star in each lightcurve. 
+        modified_flux = inject_asteroid_crossing(mytpf.lc.time.value, modified_flux)
 
-
+        # Optionally add other types of variability to help make the model more robust
         if add_pulsation:
-            mytpf.inject_stellar_pulsations()
+            modified_flux = inject_stellar_pulsations(mytpf.lc.time.value, modified_flux)
 
         if add_rrlyrae:
-            mytpf.inject_rr_lyrae()
+            modified_flux = inject_rr_lyrae(mytpf.lc.time.value, modified_flux)
 
         if save_plots:
             fig, ax = plt.subplots(2, figsize=(14,5), sharex=True)
             ax[0].plot(mytpf.lc.time.value, mytpf.lc.flux.value, color='black')
-            ax[1].plot(mytpf.lc.time.value, mytpf.flux_with_flares, color='tomato')   
+            ax[1].plot(mytpf.lc.time.value, modified_flux, color='tomato')   
             ax[0].set_title("original lc")  
             ax[1].set_title("added flares")  
-            ax[1].set_ylim(-10,10)    
+            ax[1].set_ylim(-5,15)    
             plt.savefig(f"{PACKAGEDIR}/training_data/injected_flares/{mytpf.ticid}_addedflares{extra_fname}.png")
             plt.close()
 
         # split into orbits and save .npy files. code currently splits by largest gap in the data
-        mytpf.make_orbit_files(output_dir=output_dir, plot=save_plots,extra_fname_descriptor=extra_fname)
+        mytpf.make_orbit_files(output_dir=output_dir, plot=save_plots,extra_fname_descriptor=extra_fname, 
+                               modified_flux=modified_flux, labels = flare_flags)
 
 
 
-def make_prediction_dataset(ticid : int, 
+def create_predictionset(ticid : int, 
                             sector : int = None,
                             save_plots : bool = False,
                             output_dir : str = "prediction_data/" ):
@@ -109,7 +112,7 @@ def make_prediction_dataset(ticid : int,
         
 
 
-def add_flares(target_id, sector, num_flares, output_dir = None, plot=False, extra_fname_descriptor=''):
+'''def add_flares(target_id, sector, num_flares, output_dir = None, plot=False, extra_fname_descriptor=''):
     mytpf = TessStar(f"TIC {target_id}", sector=sector, exptime=20, download_dir='tpfs/')
    #try:
     mytpf.get_metadata()
@@ -127,7 +130,7 @@ def add_flares(target_id, sector, num_flares, output_dir = None, plot=False, ext
 
     mytpf.inject_flares(flares, plot=plot) # inject them onto the lc
     # split into orbits and save .npy files. code currently splits by largest gap in the data
-    mytpf.make_orbit_files(output_dir=output_dir, plot=plot)
+    mytpf.make_orbit_files(output_dir=output_dir, plot=plot)'''
 
 
 
