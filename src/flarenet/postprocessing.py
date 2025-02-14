@@ -66,8 +66,6 @@ class TessStar(object):
 
 
 
-    #@staticmethod
-    #TODO: turn back into a static method?
     def _get_TESS_data(self,
                      download_dir: str = 'TPFs',
                      cloud : bool = False
@@ -117,11 +115,7 @@ class TessStar(object):
         Get relevant metadata from the headers of a TESS TargetPixelFile object
             If outdir is specified, save the array into an .npy file
 
-        Parameters
-        ----------
-        outdir : str
-            Directory to save metadata into
-        
+
         Returns
         -------
         metaArr : array
@@ -129,10 +123,6 @@ class TessStar(object):
         """
         
 
-        '''if outdir is not None:
-            if not os.path.exists(outdir):
-                os.mkdir(outdir)
-            np.save(f"{outdir}{self.ticid}_{self.sector}_meta.npy", metaArr)'''
         return np.array([self.tpf.ra, self.tpf.dec,  
                          self.tpf.get_header()['TESSMAG'], 
                          self.tpf.get_header()['TEFF'],  
@@ -160,7 +150,17 @@ class TessStar(object):
 
         Parameters
         ----------
-        injected_flux : array
+        modified_flux : array
+            (Optional) the flux with added flares and/or variability
+        labels : array
+            (Optional) if injected flares were added, provide an array with labels
+            1 for flares, 0 for no flares
+        output_dir : str
+            Where to save the data
+        extra_fname_descriptor : str
+            text to append to the filename
+        plot : bool
+            Whether or not to save a plot of the two TESS orbits
 
         datadir : directory to save orbit data into
         

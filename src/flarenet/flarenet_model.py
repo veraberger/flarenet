@@ -312,7 +312,7 @@ class flarenet(object):
 
         return orbit
     
-    def visualize_input(self, file=None, train=True, batch_size=32):
+    def visualize_input(self, file=None, train=True, batch_size=32, savefig=False):
         if file == None:
             file = self.training_files[0]
 
@@ -359,6 +359,8 @@ class flarenet(object):
                 ax.flatten()[j].scatter(np.arange(self.window_size), target_lc[idx-int(self.window_size/2) : idx+int(self.window_size/2)], c=labels[idx-int(self.window_size/2) : idx+int(self.window_size/2)], s=2)
             ax.flatten()[j].set_title(f"Flare label: {labels[idx]}")
         plt.tight_layout()
+        if savefig:
+            plt.savefig('data_visualization.png')
         plt.show()
 
 

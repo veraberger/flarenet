@@ -91,14 +91,10 @@ def generate_flares(
 
     Parameters
     ----------
-    all_ampls : ndarray
-        Array of relative amplitudes to draw from
-    all_fwhms : ndarray
-        Array of FWHMs to draw from
-    fraction_flare : float
-        Fraction of the light curve to cover with flares, between 0 and 1. 
-        This is an approximation, as time covered by overlapping flares will be counted by both
-    
+
+    num_flares : float
+        Number of flares to inject
+        based on the average duration, 100 flares equates to ~10% of a TESS sector
     Returns
     -------
     flare_flux : ndarray
@@ -112,11 +108,9 @@ def generate_flares(
     all_ampls = flaredf['Amp']
     all_fwhms = flaredf['FWHM']
 
-    #if ((flare_fraction <0) | (flare_fraction > 1)):
-    #    raise ValueError("fraction_flare must be a value between 0 and 1.")
+
     
     paramsArr = np.array([])
-    flare_time = 0
     flare_flux = np.zeros(len(time_arr))
 
 
