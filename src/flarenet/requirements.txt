@@ -1,10 +1,11 @@
 numpy 
 pandas
 matplotlib
-lightkurve - which version?
+lightkurve 
 astropy
 scipy
 astroquery
 scikit-learn 
 tensorflow
+keras
 tqdm

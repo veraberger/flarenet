@@ -1,30 +1,7 @@
 import numpy as np
-#import lightkurve as lk
 import warnings
+import batman
 
-
-def normalize_flux(lc_flux : np.ndarray,
-                type : str ='median'):
-    """
-    Normalization for flux
-    
-    Parameters
-    ----------
-    lc_flux : 1D array of flux values
-    type : Supported types are 'median' or 'standard'
-
-    Returns
-    -------
-    nparray containing normalized flux values
-    """
-    if type == 'median':
-        normalized = lc_flux / np.nanmedian(lc_flux)
-    elif type == 'standard':
-        normalized = (lc_flux - np.nanmean(lc_flux)) / np.nanstd(lc_flux)
-    return normalized
-
-
-    
 
 
 
@@ -79,7 +56,7 @@ def get_cosmicrays(tpf):
     return cr
 
 
-def inject_asteroid_crossing(time_arr, flux_arr):
+def inject_asteroid_crossing(time_arr):
     """
     Simulate an asteroid passing in front of a star in TESS.
     Parameters:
@@ -93,9 +70,11 @@ def inject_asteroid_crossing(time_arr, flux_arr):
     #signal = amp * np.exp(-((t - t_mid) ** 2) / (2 * sig ** 2)) # Regular gaussian
     # Make a 'flat-top' gaussian instead
     signal = amp * np.exp(-((time_arr - t_mid) / (2 * sig))**4)
-    return flux_arr + signal
+    #return (flux_arr + signal, signal > 0)
+    signal[signal < 0.000001] = 0 # Handle numerical effects
+    return signal
 
-def inject_stellar_pulsations(time_arr, flux_arr):
+def inject_stellar_pulsations(time_arr):
     periods = np.random.uniform(0.1, 5, size=3)
     amplitudes = np.random.uniform(0.01, 0.2, size=3)
     phases = np.random.uniform(0, 2*np.pi, size=3)
@@ -104,9 +83,10 @@ def inject_stellar_pulsations(time_arr, flux_arr):
     for period, amplitude, phase in zip(periods, amplitudes, phases):
         signal += amplitude * np.sin(2 * np.pi * (time_arr / period + phase))
     signal /= (1 + np.median(signal))
-    return flux_arr + signal
+    #return flux_arr + signal
+    return signal
 
-def inject_rr_lyrae(time_arr, flux_arr):
+def inject_rr_lyrae(time_arr):
     """
     Simulate an RR Lyrae variable star light curve.
     Parameters:
@@ -134,24 +114,30 @@ def inject_rr_lyrae(time_arr, flux_arr):
     signal = signal - 0.1 * amplitude * np.sin(4 * np.pi * phase)
     # Normalize around 1
     signal /= np.median(signal)
-    return flux_arr + signal - 1
+    #return flux_arr + signal - 1
+    return signal - 1
 
-
-def inject_flares(
-                    flare_flux : np.ndarray, 
-                    flux_arr : np.ndarray, 
-                    ): 
+def inject_exoplanet(time_arr):
     """
-    Parameters
-    ----------
-    flare_flux : ndarray
-        Array of flare fluxes to inject
-    
-    Returns
-    -------
-        : ndarray
-        Array of flare fluxes added to light curve
+    Simulate an exoplanet transit in TESS.
     """
+    #import batman
+    params = batman.TransitParams()              #object to store transit parameters
+    params.t0 = np.random.choice(time_arr)       #time of inferior conjunction
+    params.per = np.random.uniform(0.02,13.)     #orbital period
+    params.rp = np.random.uniform(0.01,0.14)     #planet radius (in units of stellar radii)
+    params.a = ((params.per / 365.25)**2)**(1/3) * 215.03215567       #semi-major axis (in units of stellar radii)
+    params.inc = np.random.uniform(88., 90.)     #orbital inclination (in degrees)
+    params.ecc = np.random.uniform(0., 0.3)      #eccentricity
+    params.w = 90.                               #longitude of periastron (in degrees)
+    params.limb_dark = "quadratic"               #limb darkening model
+    q1 = np.random.uniform(0.1,0.7)
+    q2 = np.random.uniform(0.1,0.7)
+    params.u = [q1, q2]                          #limb darkening coefficients
+ 
+    m = batman.TransitModel(params, time_arr)
+    signal = m.light_curve(params) - 1
+ 
+    #return (flux_arr + signal, signal < 0)
+    return signal
 
-    flux_with_flares = flux_arr + (flare_flux * flux_arr)
-    return normalize_flux(flux_with_flares, type='standard')
