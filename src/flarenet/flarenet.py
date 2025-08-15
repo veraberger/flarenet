@@ -29,7 +29,7 @@ default_params = {
 }
 
 def create_training_dataset( 
-                    save_plots : bool = False,
+                    save_plot : bool = False,
                     num_flares : Union[int, str] = 100,
                     output_dir : str = "training_data/labeled_data",
                     cloud : bool = False, 
@@ -40,7 +40,7 @@ def create_training_dataset(
     
     Parameters:
     -----------
-    save_plots : bool = False
+    save_plot : bool = False
         Save plots of the injected lightcurves
     num_flares : Union[int, str] = 100,
         Number of flares to inject for each lightcurve. 
@@ -59,7 +59,6 @@ def create_training_dataset(
     None; however, lightcurves injected flares will be saved as csv files
     """
 
-    output_dir = "training_data/labeled_data"
     #Gets a list of quiet (non-flaring) stars
     quietstars = pd.read_csv(f"{PACKAGEDIR}/supplemental_files/ids_sectors_quietlcs.txt", sep=' ', header=0, usecols=['TIC', 'sector'])
     if verbose:
@@ -80,8 +79,8 @@ def create_training_dataset(
                         )
         mytpf.save_data(train=True)
 
-        if save_plots:
-            mytpf.plot_lc(save_plot=True)
+        if save_plot:
+            mytpf.plot_lc()
 
 
 
@@ -145,7 +144,7 @@ class Flarenet(object):
 
     
 
-    def prep_data(self, file, train=True, max_gap=1.0, verbose=0):
+    def prep_data(self, file, train=True, verbose=0):
         if verbose:
             print(f"Starting to prep data for file: {file}")
         try:
@@ -319,7 +318,7 @@ class Flarenet(object):
                 print(f"Sector not specified. Generating file for first available sector")
             else:
                 print(f"Preparing file for TIC {ticid}")
-            prediction_file = f"{prediction_dir}/TIC {ticid}_{sector}_data.csv"
+        prediction_file = f"{prediction_dir}/TIC {ticid}_{sector}_data.csv"
             
         if prediction_file not in all_prepared_files:
             ts = TessStar(ticid, sector)
@@ -402,10 +401,29 @@ class Flarenet(object):
 
     def create_data_generator(self, 
                                 files,
-                                drop_frac=.1,
+                                drop_frac=.9,
                                 verbose=1,
                                 train=True,
                             ):
+        """Sets up a data generator to feed the CNN model
+
+        Parameters
+        ----------
+        files : list[str]
+            list of files to used
+        drop_frac : float, optional
+            fraction of flare samples to skip during training, by default .9
+        verbose : int, optional
+            If 1, print status updates to screen, by default 1
+        train : bool, optional
+            Flag indicating if prepareing a generator for training (True) or prediction (False), 
+            by default True
+
+        Returns
+        -------
+        Yields prepared data generator for use by a CNN model
+
+        """
         
         if verbose:
             print(f"Creating generator with {len(files)} files")
@@ -444,7 +462,7 @@ class Flarenet(object):
                     if verbose:
                         print(f"File {file}: {len(flare_indices)} flare indices, {len(nonflare_indices)} non-flare indices")
                     
-                    n_samples = math.floor(min(len(nonflare_indices), len(flare_indices))*drop_frac)
+                    n_samples = math.floor(min(len(nonflare_indices), len(flare_indices))*(1-drop_frac))
                     if n_samples == 0:
                         if verbose:
                             print(f"Skipping file {file}: no valid samples")
