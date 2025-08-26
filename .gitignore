@@ -1,3 +1,7 @@
+src/flarenet/training_data/
+# src/flarenet/prediction_data/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
