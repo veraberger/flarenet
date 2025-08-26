@@ -69,7 +69,7 @@ def create_training_dataset(
         sector = row['sector']
 
         if verbose:
-            print(f"Creating flares for {id} Sector {sector}")
+            print(f"Beginning processing for {id} Sector {sector}")
         
         mytpf = TessStar(f"TIC {id}", sector=sector, cloud = cloud)
         mytpf.inject_training_flares(
@@ -100,7 +100,7 @@ def split_train_val(all_files, val_fraction=0.2):
 
     Returns
     -------
-    trin_files, val_files
+    train_files, val_files
         arrays containing files to use for training and validation
     """
     
@@ -265,18 +265,22 @@ class Flarenet(object):
         val_dataset = self.create_data_generator(val_files, verbose=verbose, train=True)
 
         callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=100, restore_best_weights=True)
+        if verbose:
+            print(f"Beginning model training using {len(train_files)} training and {len(val_files)} validation lightcurves")
 
         history = self.model.fit(train_dataset, 
-                            epochs=self.epochs, #2
+                            epochs=1, #self.epochs, #2
                             steps_per_epoch=self.batches_per_epoch,
                             callbacks=[callback], 
-                            verbose=verbose,
+                            verbose=1,#always print status for training
                             validation_data=val_dataset,
                             validation_steps=self.batches_per_epoch // 5)#, use_multiprocessing=True)
         if save_model:
             self.model.save(f"{PACKAGEDIR}/{save_model}.keras")
         if save_weights:
             self.model.save_weights(f"{PACKAGEDIR}/{save_weights}.weights.h5")
+        if verbose:
+            print("NN model training successfully completed.")
         return history
     
 
@@ -287,6 +291,7 @@ class Flarenet(object):
                 prediction_dir=f'{PACKAGEDIR}/prediction_data',
                 verbose=1,
                 save_plot= True,
+                overwrite_predictions = False,
                 ):
         """Predict the presence of flares in TESS 20-second data.
         TICID and sector. If no sector is specified, the first available sector for the target will be used. 
@@ -325,8 +330,10 @@ class Flarenet(object):
             prediction_file = ts.save_data(train=False)
 
             
-
-        completed_prediction_files = os.listdir(f"{prediction_dir}/flarenet_predictions/")
+        if overwrite_predictions:
+            completed_prediction_files = []
+        else:
+            completed_prediction_files = os.listdir(f"{prediction_dir}/flarenet_predictions/")
 
         if f"TIC {ticid}_{sector}_predictions.csv" not in completed_prediction_files:
 
@@ -368,8 +375,9 @@ class Flarenet(object):
 
                 target_df['model_prediction'] = preds
                 target_df = target_df[target_df['filled'] == 0]
-                target_df = target_df.drop(columns=['filled']).reset_index()
-                target_df.to_csv(f"{prediction_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.csv")
+                
+                target_df = target_df.drop(columns=['filled'])#.reset_index()
+                target_df.to_csv(f"{prediction_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.csv", index=None)
                 if verbose:
                     print(f"Successfully processed file: {prediction_file}")
 
@@ -416,8 +424,9 @@ class Flarenet(object):
         verbose : int, optional
             If 1, print status updates to screen, by default 1
         train : bool, optional
-            Flag indicating if prepareing a generator for training (True) or prediction (False), 
-            by default True
+            Flag indicating if preparing a generator for training (True) or prediction (False).
+            If train=True, possible false positive signals (exoplanet transits, pulsations, 
+            asteroid crossings) will randomly injected on-the-fly. By default True
 
         Returns
         -------
@@ -487,8 +496,6 @@ class Flarenet(object):
                     try:
                         flux_window=target_lc[idx-int(self.window_size/2):idx+int(self.window_size/2)]
                         time_window = ttime[idx-int(self.window_size/2):idx+int(self.window_size/2)]
-                        # TODO: should we allow it to be anywhere? SO a flare can happen during a transit for example
-                        # TODO: What about rr-lyrae pulsations or asteroids?
                         if (train) & (idx in valid_nonflare_indices):
                             rand = np.random.rand()
                             if rand < 0.2: #np.random.rand()<0.2:

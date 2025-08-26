@@ -157,6 +157,7 @@ def generate_flares(
 
         flare_flux += flare
         nf += 1
+        paramsArr = paramsArr.reshape(-1,3) # np.append flattens the input; this restores the shape
 
         valid_flare_flags += flare_flags
     return flare_flux, paramsArr, valid_flare_flags

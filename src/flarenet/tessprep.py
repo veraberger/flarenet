@@ -221,11 +221,11 @@ class TessStar(object):
         #for ii, idx in enumerate(idxs):
 
         if verbose:
-            print(f"Creating flares for {self.ticid} Sector {self.sector}")
+            print(f"Creating flares for TIC {self.ticid} Sector {self.sector}")
 
 
         self.get_metadata()
-        # inject flares such that approximately <flare_frac> of the LC is covered in flares
+        # inject flares
         flares, params, valid_flare_indices = generate_flares(self.lc.time.value, num_flares = num_flares) 
 
         if not os.path.exists(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params"):
@@ -233,9 +233,8 @@ class TessStar(object):
         np.save(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/{self.ticid}_{self.sector}_flareparams.npy", params)
         
         # get array of 0 (no flare) or 1 (flare)
-        # Threshold is 1 standard deviation BEFORE cosmic rays were added back in
+        # Threshold is 1.5 standard deviation BEFORE cosmic rays were added back in
         threshold = 1.5 * self.lc_std #(self.lc_std / np.nanmedian(self.lc.flux)).value
-        #print(f"Threshold: {threshold}")
         flare_flags = np.where(flares > threshold, 1, 0)
         flare_flags[~valid_flare_indices] = 0
 
@@ -293,7 +292,6 @@ class TessStar(object):
 
     def save_data(self, 
             train = True,
-            #output_dir = f'training_data/labeled_data',
             #plot = False
             ):
         """
@@ -302,27 +300,15 @@ class TessStar(object):
 
         Parameters
         ----------
-        modified_flux : array
-            (Optional) the flux with added flares and/or variability
-        labels : array
-            (Optional) if injected flares were added, provide an array with labels
-            1 for flares, 0 for no flares
-        output_dir : str
-            Where to save the data
-        extra_fname_descriptor : str
-            text to append to the filename
-        plot : bool
-            Whether or not to save a plot of the two TESS orbits
-
-        datadir : directory to save orbit data into
+        train : bool
+            Whether data being saves will be used for model training or prediction
         
         Returns
         -------
-        Nothing (results saved to datadir)
+        fname :
+            file path to the saved csv file
         """
-        # Alternative: Use the MIT observing times table. Need to update this regularly though.
-        # https://tess.mit.edu/public/files/TESS_FFI_observation_times.csv
-        # Instead of treating each orbit separately, do we just want to split anytime there is a gap greater than X time?
+
         if train:
             output_dir = f'training_data/labeled_data'
         else:
