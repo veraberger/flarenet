@@ -82,6 +82,8 @@ def create_training_dataset(
         if save_plot:
             mytpf.plot_lc()
 
+    os.system('rm -rf ~/.lksearch/cache/mastDownload/TESS/')
+
 
 
 
