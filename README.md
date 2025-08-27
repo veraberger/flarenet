@@ -22,7 +22,7 @@ pip install .
 ### Usage
 Tutorial notebook: [docs/example.ipynb](docs/example.ipynb)
 
-Use our model trained on real TESS light curves with injected false-positive variability signatures, or train your own with the ```Flarenet``` class.
+Use our model trained on real TESS light curves with injected false-positives, or train your own with the ```Flarenet``` class.
 
 The model outputs likelihoods only - choose your own confidence threshold for flares.
 
