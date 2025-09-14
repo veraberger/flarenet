@@ -221,7 +221,7 @@ class TessStar(object):
         #for ii, idx in enumerate(idxs):
 
         if verbose:
-            print(f"Creating flares for TIC {self.ticid} Sector {self.sector}")
+            print(f"Creating flares for {self.ticid} Sector {self.sector}")
 
 
         self.get_metadata()
