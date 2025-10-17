@@ -52,9 +52,9 @@ def get_TESS_data(ticid : Union[str, int, SkyCoord],
     if cloud == True:
         sr = lksearch.TESSSearch(ticid, sector=sector, exptime=exptime, pipeline='SPOC')
         if tpf:
-            cloud_uri = sr.cubedata.cloud_uris
+            cloud_uri = sr.cubedata.cloud_uri
         else:
-            cloud_uri = sr.timeseries.cloud_uris
+            cloud_uri = sr.timeseries.cloud_uri
         tess_data = lk.io.read(cloud_uri[0])
     else:
         sr = lksearch.TESSSearch(ticid, sector=sector, exptime=exptime, pipeline='SPOC')
