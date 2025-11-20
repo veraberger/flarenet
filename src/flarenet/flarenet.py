@@ -77,7 +77,7 @@ def create_training_dataset(
                         verbose = verbose,
                         num_flares = num_flares,
                         )
-        mytpf.save_data(train=True)
+        mytpf.save_data(save_type='train')
 
         if save_plot:
             mytpf.plot_lc()
@@ -150,7 +150,11 @@ class Flarenet(object):
         if verbose:
             print(f"Starting to prep data for file: {file}")
         try:
-            target_data = pd.read_csv(file, index_col=False)
+            if isinstance(file, str):
+                target_data = pd.read_csv(file, index_col=False)
+            else:
+                target_data = file
+            
             if verbose:
                 print(f"CSV file loaded. Shape before cleaning: {target_data.shape}")
             
@@ -285,15 +289,88 @@ class Flarenet(object):
             print("NN model training successfully completed.")
         return history
     
+    def injection_recovery(self,
+                           ticid,
+                           sector=None,
+                           data_dir='injection_recovery',
+                           verbose=1,
+                           cloud=False,
+                           num_flares = 100,
+                           save_flares=False,
+                           ):
+        if not os.path.exists(f"{PACKAGEDIR}/{data_dir}"):
+            os.mkdir(f"{PACKAGEDIR}/{data_dir}")
+        if verbose:
+            if sector == None:
+                print(f"Sector not specified. Generating file for first available sector")
+            else:
+                print(f"Preparing file for TIC {ticid}")
+        data_file = f"{PACKAGEDIR}/{data_dir}/TIC {ticid}_{sector}_data.csv"
+
+        #if data_file not in all_data_files:
+        ts = TessStar(ticid, sector, cloud=cloud)
+        #rolling_median = star['flux'].rolling(window=30).median()
+        #lc_std = np.std(star['flux'] - rolling_median)
+        #random_time = np.random.choice(ts.lc['time'].values, size=nflares)
+        #random_amp_significance = np.random.lognormal(np.log(25),1, size=nflares)
+        #random_fwhm = np.random.lognormal(np.log(15/24/60),1, size=nflares)
+        
+        #flaremodels = [flare_model(star['time'].values, random_time[i], random_fwhm[i], random_amp_significance[i]) for i in range(len(random_time))]
+        #fm = np.nansum(flaremodels, axis=0)
+        if verbose:
+            print(f"Injecting {num_flares} flares into the lightcurve")
+        ts.inject_training_flares(
+                    num_flares = num_flares,
+                    output_dir = f"{data_dir}",
+                    )
+        ts.save_data(save_type='injection_recovery')
+        
+        if verbose:
+            print("Making flarenet predictions for the injected flares.")
+        predictions = self.predict(ticid, 
+                                    sector=sector,
+                                    data_dir=data_dir,
+                                    overwrite_predictions=True
+                                    )
+        
+        injected_flares = np.load(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_flareparams.npy')
+        injected_flares = pd.DataFrame(injected_flares, columns=['time', 'amp','fwhm'])
+        max_prediction = []
+        med_prediction = []
+        for index, flare in injected_flares.iterrows():
+            peak = flare['time']
+            local_lc = predictions[(predictions['time'] > peak - 1/60/24) & (predictions['time'] < peak + flare['fwhm'])]
+            max_prediction.append(np.nanmax(local_lc['model_prediction']))
+            med_prediction.append(np.nanmedian(local_lc['model_prediction']))
+            if save_flares:
+                flare_lc = predictions[(predictions['time'].values > (peak - 1/24)) & (predictions['time'].values < (peak + 1/24))]
+                flare_lc.to_csv(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_flare{index}.csv')
+                plt.scatter(flare_lc['time'], flare_lc['flux'], c=flare_lc['model_prediction'], vmin=0, vmax=1)
+                plt.savefig(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_flare{index}.png')
+                plt.close()
+                
+        injected_flares['max_pred'] = max_prediction
+        injected_flares['med_pred'] = med_prediction
+        
+        injected_flares.to_csv(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_injection_recovery_preds.csv')
+        if verbose:
+            print("Prediction complete.")
+        return (predictions, injected_flares)
+                
+        
 
 
     def predict(self, 
                 ticid,
+                data_file=None,
                 sector=None,
-                prediction_dir=f'{PACKAGEDIR}/prediction_data',
+                data_dir='prediction_data',
                 verbose=1,
                 save_plot= True,
+                show_plot=False,
                 overwrite_predictions = False,
+                cloud = False,
+                save_type = 'predict',
                 ):
         """Predict the presence of flares in TESS 20-second data.
         TICID and sector. If no sector is specified, the first available sector for the target will be used. 
@@ -317,7 +394,10 @@ class Flarenet(object):
             pandas DataFrame containing the given observations and the flarenet predictions.
         """
         # Check existing prediction data
-        all_prepared_files = glob.glob(f"{prediction_dir}/*.csv")
+        if not os.path.exists(f"{PACKAGEDIR}/{data_dir}"):
+            os.mkdir(f"{PACKAGEDIR}/{data_dir}")
+
+        all_data_files = glob.glob(f"{PACKAGEDIR}/{data_dir}/*.csv")
 
 
         if verbose:
@@ -325,26 +405,29 @@ class Flarenet(object):
                 print(f"Sector not specified. Generating file for first available sector")
             else:
                 print(f"Preparing file for TIC {ticid}")
-        prediction_file = f"{prediction_dir}/TIC {ticid}_{sector}_data.csv"
+        if data_file is None:
+            data_file = f"{PACKAGEDIR}/{data_dir}/TIC {ticid}_{sector}_data.csv"
             
-        if prediction_file not in all_prepared_files:
-            ts = TessStar(ticid, sector)
-            prediction_file = ts.save_data(train=False)
+            if data_file not in all_data_files:
+                ts = TessStar(ticid, sector, cloud=cloud)
+                data_file = ts.save_data(save_type=save_type)
 
             
         if overwrite_predictions:
             completed_prediction_files = []
         else:
-            completed_prediction_files = os.listdir(f"{prediction_dir}/flarenet_predictions/")
+            if not os.path.exists(f"{PACKAGEDIR}/{data_dir}/flarenet_predictions/"):
+                os.mkdir(f"{PACKAGEDIR}/{data_dir}/flarenet_predictions/")
+            completed_prediction_files = os.listdir(f"{PACKAGEDIR}/{data_dir}/flarenet_predictions/")
 
         if f"TIC {ticid}_{sector}_predictions.csv" not in completed_prediction_files:
 
             try: 
                 if verbose:
-                    print(f"No predictions available for TIC {ticid} Sector {sector}. Starting prediction for file: {prediction_file}")
+                    print(f"No predictions available for TIC {ticid} Sector {sector}. Starting prediction for file: {data_file}")
                 
                 # Prepare data using pred_data function
-                target_lc, target_df = self.prep_data(prediction_file, train=False, verbose=verbose)
+                target_lc, target_df = self.prep_data(data_file, train=False, verbose=verbose)
 
                 if verbose:
                     print(f"Prepared data shape: {target_lc.shape}")
@@ -379,28 +462,27 @@ class Flarenet(object):
                 target_df = target_df[target_df['filled'] == 0]
                 
                 target_df = target_df.drop(columns=['filled'])#.reset_index()
-                target_df.to_csv(f"{prediction_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.csv", index=None)
+                target_df.to_csv(f"{PACKAGEDIR}/{data_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.csv", index=None)
                 if verbose:
-                    print(f"Successfully processed file: {prediction_file}")
-
+                    print(f"Successfully processed file: {data_file}")
 
 
         
             except Exception as e:
-                print(f"Error processing file {prediction_file}: {str(e)}")
+                print(f"Error processing file {data_file}: {str(e)}")
                 print(traceback.format_exc())  # This will print the full traceback
 
 
         else:
-            target_df = pd.read_csv(f"{prediction_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.csv")
+            target_df = pd.read_csv(f"{PACKAGEDIR}/{data_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.csv")
 
         
         fig, ax = plt.subplots(1, figsize=(12,4))
         ax.set_title(f"TIC {ticid} Sector {sector}")
         ax.scatter(target_df['time'].values, target_df['flux'].values, zorder=0, c=target_df['model_prediction'].values, s=2)
         if save_plot:
-            plt.savefig(f"{prediction_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.png")
-        else:
+            plt.savefig(f"{PACKAGEDIR}/{data_dir}/flarenet_predictions/TIC {ticid}_{sector}_predictions.png")
+        if show_plot:
             plt.show()
         plt.close()
 

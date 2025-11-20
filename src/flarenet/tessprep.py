@@ -230,7 +230,7 @@ class TessStar(object):
 
         if not os.path.exists(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params"):
             os.mkdir(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params")
-        np.save(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/{self.ticid}_{self.sector}_flareparams.npy", params)
+        np.save(f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/TIC {self.ticid}_{self.sector}_flareparams.npy", params)
         
         # get array of 0 (no flare) or 1 (flare)
         # Threshold is 1.5 standard deviation BEFORE cosmic rays were added back in
@@ -291,8 +291,7 @@ class TessStar(object):
     
 
     def save_data(self, 
-            train = True,
-            #plot = False
+            save_type = 'train',
             ):
         """
         Take a light curve and supplemental information for some target and sector
@@ -300,8 +299,9 @@ class TessStar(object):
 
         Parameters
         ----------
-        train : bool
-            Whether data being saves will be used for model training or prediction
+        save_type : str
+            Options 'train', 'predict', and 'injection_recovery'. 
+            This affects where the data will be saved. 
         
         Returns
         -------
@@ -309,10 +309,15 @@ class TessStar(object):
             file path to the saved csv file
         """
 
-        if train:
-            output_dir = f'training_data/labeled_data'
+        if save_type == 'train':
+            output_dir = 'training_data/labeled_data'
+        elif save_type == 'injection_recovery':
+            output_dir = 'injection_recovery'
+        elif save_type == 'predict':
+            output_dir = 'prediction_data'
         else:
-            output_dir = f'prediction_data'
+            print("save_type not recognized. Please specify 'train', 'predict', or 'injection_recovery'")
+
         if hasattr(self.lc, 'modified_flux'): # If flares have been added (for training)
             df = pd.DataFrame(data={'time':self.lc.time.value, 
                                     'og_flux':self.lc.flux.value, 
@@ -333,7 +338,7 @@ class TessStar(object):
             )
 
 
-        fname = f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}_data.csv"
+        fname = f"{PACKAGEDIR}/{output_dir}/TIC {self.ticid}_{self.sector}_data.csv"
         df.to_csv(fname, index=False)
 
         return fname
