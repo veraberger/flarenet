@@ -134,6 +134,7 @@ class TessStar(object):
         plt.legend()
         if save_plot:
             plt.savefig(f"{PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}.png")
+            print(f"File saved to {PACKAGEDIR}/{output_dir}/{self.ticid}_{self.sector}.png")
         else:
             plt.show()
 
@@ -291,7 +292,7 @@ class TessStar(object):
     
 
     def save_data(self, 
-            save_type = 'train',
+            save_type = 'predict',
             ):
         """
         Take a light curve and supplemental information for some target and sector
