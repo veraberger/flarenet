@@ -288,76 +288,7 @@ class Flarenet(object):
         if verbose:
             print("NN model training successfully completed.")
         return history
-    
-    def injection_recovery(self,
-                           ticid,
-                           sector=None,
-                           data_dir='injection_recovery',
-                           verbose=1,
-                           cloud=False,
-                           num_flares = 100,
-                           save_flares=False,
-                           ):
-        if not os.path.exists(f"{PACKAGEDIR}/{data_dir}"):
-            os.mkdir(f"{PACKAGEDIR}/{data_dir}")
-        if verbose:
-            if sector == None:
-                print(f"Sector not specified. Generating file for first available sector")
-            else:
-                print(f"Preparing file for TIC {ticid}")
-        data_file = f"{PACKAGEDIR}/{data_dir}/TIC {ticid}_{sector}_data.csv"
-
-        #if data_file not in all_data_files:
-        ts = TessStar(ticid, sector, cloud=cloud)
-        #rolling_median = star['flux'].rolling(window=30).median()
-        #lc_std = np.std(star['flux'] - rolling_median)
-        #random_time = np.random.choice(ts.lc['time'].values, size=nflares)
-        #random_amp_significance = np.random.lognormal(np.log(25),1, size=nflares)
-        #random_fwhm = np.random.lognormal(np.log(15/24/60),1, size=nflares)
-        
-        #flaremodels = [flare_model(star['time'].values, random_time[i], random_fwhm[i], random_amp_significance[i]) for i in range(len(random_time))]
-        #fm = np.nansum(flaremodels, axis=0)
-        if verbose:
-            print(f"Injecting {num_flares} flares into the lightcurve")
-        ts.inject_training_flares(
-                    num_flares = num_flares,
-                    output_dir = f"{data_dir}",
-                    )
-        ts.save_data(save_type='injection_recovery')
-        
-        if verbose:
-            print("Making flarenet predictions for the injected flares.")
-        predictions = self.predict(ticid, 
-                                    sector=sector,
-                                    data_dir=data_dir,
-                                    overwrite_predictions=True
-                                    )
-        
-        injected_flares = np.load(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_flareparams.npy')
-        injected_flares = pd.DataFrame(injected_flares, columns=['time', 'amp','fwhm'])
-        max_prediction = []
-        med_prediction = []
-        for index, flare in injected_flares.iterrows():
-            peak = flare['time']
-            local_lc = predictions[(predictions['time'] > peak - 1/60/24) & (predictions['time'] < peak + flare['fwhm'])]
-            max_prediction.append(np.nanmax(local_lc['model_prediction']))
-            med_prediction.append(np.nanmedian(local_lc['model_prediction']))
-            if save_flares:
-                flare_lc = predictions[(predictions['time'].values > (peak - 1/24)) & (predictions['time'].values < (peak + 1/24))]
-                flare_lc.to_csv(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_flare{index}.csv')
-                plt.scatter(flare_lc['time'], flare_lc['flux'], c=flare_lc['model_prediction'], vmin=0, vmax=1)
-                plt.savefig(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_flare{index}.png')
-                plt.close()
-                
-        injected_flares['max_pred'] = max_prediction
-        injected_flares['med_pred'] = med_prediction
-        
-        injected_flares.to_csv(f'{PACKAGEDIR}/{data_dir}/artificial_flare_params/TIC {ticid}_{sector}_injection_recovery_preds.csv')
-        if verbose:
-            print("Prediction complete.")
-        return (predictions, injected_flares)
-                
-        
+            
 
 
     def predict(self, 
