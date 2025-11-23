@@ -1,5 +1,6 @@
 src/flarenet/training_data/
-# src/flarenet/prediction_data/
+src/flarenet/prediction_data/
+src/flarenet/injection_recovery/
 
 
 # Byte-compiled / optimized / DLL files
