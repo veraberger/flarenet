@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "flarenet"
+version = "0.1.1"
+description = "a convolutional neural network to predict flares in 20-second TESS data"
+authors = ["Vera Berger <vlberger@mit.edu>, Nicole Schanche <nicole.e.schanche@nasa.gov>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "flarenet", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+lksearch = ">=1.1.0" 
+lightkurve = ">=2.5.0"
+numpy = ">=1.26.0"
+tensorflow = ">=2.17.0"
+scikit_learn = ">=1.3.0"
+astropy = ">=5.3"
+pandas = ">=2.2,<3.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
