@@ -145,11 +145,12 @@ def split_train_val(all_files, val_fraction=0.2):
     val_files = all_files[split_idx:]
     return train_files, val_files
 
+
 def injection_recovery(
-    num_sources,
-    num_flares=20,
-    rise_time_minutes=1,
-    save_plots=False,
+    num_sources : Union[int, str],
+    num_flares : Union[int, str] = 20,
+    rise_time_minutes : int = 1,
+    save_plots : bool =False,
     verbose : int = 1
     ):
     """
