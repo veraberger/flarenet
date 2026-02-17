@@ -1,8 +1,7 @@
 import numpy as np
+import pandas as pd
 import warnings
 import batman
-
-
 
 
 def get_cosmicrays(tpf):
@@ -141,90 +140,5 @@ def inject_exoplanet(time_arr):
     #return (flux_arr + signal, signal < 0)
     return signal
 
-import pandas as pd
-import numpy as np
-import flarenet
 
-def injection_recovery(
-    num_sources,
-    num_flares=10,
-    rise_time_minutes=1,
-    save_plots=False,
-    random_seed=None
-):
-    """
-    Inject and recover synthetic flares.
-    
-    Parameters
-    ----------
-    num_sources : int
-        number of sources to test
-    num_flares : int, optional
-        flares to inject per source
-    rise_time_minutes : bool, optional
-        how many minutes before tpeak to include when checking predictions
-    save_plots : bool, optional
-        whether to save the prediction light curves
-    random_seed : int
-    
-    Returns:
-    ----------
-    - results : pandas DataFrame with columns:
-        tic_id, sector, tpeak, amp, fwhm, snr, max_prediction, median_prediction
-        max_prediction: max prediction within window of [tpeak - rise_time_minutes, tpeak + fwhm]
-        median_prediction: median prediction within window
-    """
 
-    # sample quiet targets
-    dftrain = pd.read_csv('../src/flarenet/supplemental_files/ids_sectors_quietlcs.txt', sep=' ')
-    df_targs = dftrain.sample(num_sources, random_state=np.random.seed(random_seed))
-    df_targs['TIC'] = df_targs['TIC'].astype(str)
-    pairs = list(zip(df_targs['TIC'], df_targs['sector']))
-    
-    # inject flares
-    create_training_dataset(
-        pairs, 
-        num_flares=num_flares,
-        cloud=True, 
-        save_plot=False
-    )
-    
-    
-    fn = flarenet.Flarenet()
-    results = []
-
-    # run predictions; save median and max prediction per injected flare
-    for ticid, sector in pairs:
-        df = fn.predict(
-                ticid, 
-                sector=sector, 
-                prediction_dir='../src/flarenet/training_data/labeled_data',
-                save_plot=save_plots
-            )
-        
-        # calculate noise level for flare SNR
-        rolling_median = df['flux'].rolling(window=30, center=True).median()
-        lc_std = np.nanstd(df['flux'] - rolling_median)
-        
-        # load injection parameters returned by create_training_dataset
-        flareparams = np.load(f'../src/flarenet/training_data/artificial_flare_params/TIC {ticid}_{sector}_flareparams.npy')
-        flareparams = flareparams.reshape(-1, 3)
-        
-        # analyze each injected flare
-        for tpeak, amp, fwhm in flareparams:
-            # get predictions in window around flare
-            mask = (df['time'] > tpeak - rise_time_minutes/60/24) & (df['time'] < tpeak + fwhm)
-            local_preds = df.loc[mask, 'model_prediction']
-            
-            results.append({
-                'tic_id': ticid,
-                'sector': int(sector),
-                'tpeak': tpeak,
-                'amp': amp,
-                'fwhm': fwhm,
-                'snr': amp / lc_std,
-                'max_prediction': np.nanmax(local_preds),
-                'median_prediction': np.nanmedian(local_preds)
-            })
-    
-    return pd.DataFrame(results)

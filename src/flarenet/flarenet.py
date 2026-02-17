@@ -24,29 +24,33 @@ default_params = {
     'data_dir' : f"{PACKAGEDIR}/",
     'window_size':500,
     'batch_size':256,
-    'batches_per_epoch' : 100,
+    'batches_per_epoch':100,
     'epochs':1000,
 }
 
 def create_training_dataset( 
+                    num_sources : int = 1000,
                     save_plot : bool = False,
                     num_flares : Union[int, str] = 100,
-                    output_dir : str = "training_data/labeled_data",
+                    save_type : str = 'train',
                     cloud : bool = False, 
                     verbose : int = 1,
                     ):
     """
-    This function can be used to generate traning data by injecting flares into quiet TESS lightcurves
+    This function can be used to generate training data by injecting flares into quiet TESS lightcurves
     
     Parameters:
     -----------
+    num_sources : int = 1000
+        Number of quiet stars to inject on
     save_plot : bool = False
         Save plots of the injected lightcurves
     num_flares : Union[int, str] = 100,
         Number of flares to inject for each lightcurve. 
         Default is 100, with covers ~10% of a TESS sector
-    output_dir : str
-        path to the directory to store the lightcurves with injected flares
+    save_type :  str = 'train'
+        Denotes directory to save light curves into
+       Default is 'train', otherwise 'predict' or 'injection_recovery'
     cloud : bool
         Whether to use data stored by MAST on AWS. 
         If false, the files will be downloaded locally. 
@@ -56,35 +60,64 @@ def create_training_dataset(
 
     Returns:
     -------
-    None; however, lightcurves injected flares will be saved as csv files
+    None; however, lightcurves with injected flares will be saved as csv files
     """
+    if save_type == 'train':
+        output_dir = 'training_data/labeled_data'
+    elif save_type == 'injection_recovery':
+        output_dir = 'injection_recovery'
+    elif save_type == 'predict':
+        output_dir = 'prediction_data'
+    else:
+        print("save_type not recognized. Please specify 'train', 'predict', or 'injection_recovery'")
+    if not os.path.exists(f"{PACKAGEDIR}/{output_dir}"):
+            os.mkdir(f"{PACKAGEDIR}/{output_dir}")
 
     #Gets a list of quiet (non-flaring) stars
     quietstars = pd.read_csv(f"{PACKAGEDIR}/supplemental_files/ids_sectors_quietlcs.txt", sep=' ', header=0, usecols=['TIC', 'sector'])
+    N=len(quietstars)
+    if num_sources > N:
+        raise ValueError(f"num_sources ({num_sources}) exceeds available quiet stars ({N})")
+
+    quietstars = quietstars.sample(n=num_sources, replace=False)
+
     if verbose:
-        print(f"Injecting flares into {len(quietstars)} lightcurves.")
+        print(f"Injecting flares into {num_sources} lightcurves.")
     
-    for index, row in quietstars.iterrows():
-        id = row['TIC']
+
+    for _, row in quietstars.iterrows():
+        id = row['TIC'].astype(str)
         sector = row['sector']
 
+        params_path = f"{PACKAGEDIR}/{output_dir}/artificial_flare_params/TIC {id}_{sector}_flareparams.npy"
+        lc_path = f"{PACKAGEDIR}/{output_dir}/TIC {id}_{sector}_data.csv" 
+
+        if os.path.exists(params_path) and os.path.exists(lc_path):
+            if verbose:
+                print(f"Loading existing injection for TIC {id} Sector {sector}")
+            continue
+
+
         if verbose:
-            print(f"Beginning processing for {id} Sector {sector}")
+            print(f"Beginning processing for TIC {id} Sector {sector}")
         
-        mytpf = TessStar(f"TIC {id}", sector=sector, cloud = cloud)
+        mytpf = TessStar(id, sector=sector, cloud = cloud)
         mytpf.inject_training_flares(
                         save_plot = True,
                         verbose = verbose,
+                        output_dir = output_dir,
                         num_flares = num_flares,
                         )
-        mytpf.save_data(save_type='train')
+        mytpf.save_data(save_type=save_type)
 
         if save_plot:
             mytpf.plot_lc()
 
+
+    
+    quietstars.to_csv(f"{PACKAGEDIR}/{output_dir}/{save_type}_sources.csv", index=False)
+
     os.system('rm -rf ~/.lksearch/cache/mastDownload/TESS/')
-
-
 
 
 
@@ -113,6 +146,102 @@ def split_train_val(all_files, val_fraction=0.2):
     return train_files, val_files
 
 
+def injection_recovery(
+    num_sources : Union[int, str],
+    num_flares : Union[int, str] = 20,
+    rise_time_minutes : int = 1,
+    save_plots : bool =False,
+    verbose : int = 1
+    ):
+    """
+    Inject and recover synthetic flares.
+    
+    Parameters
+    ----------
+    num_sources : int
+        Number of sources to test
+    num_flares : int, optional
+        Flares to inject per source
+    rise_time_minutes : bool, optional
+        How many minutes before tpeak to include when checking predictions
+    save_plots : bool, optional
+        Whether to save the prediction light curves
+    verbose : 
+        Whether to print debugging information during processing
+    
+    Returns:
+    ----------
+    - results : pandas DataFrame with columns:
+        tic_id, sector, tpeak, amp, fwhm, snr, max_prediction, median_prediction
+        max_prediction: max prediction within window of [tpeak - rise_time_minutes, tpeak + fwhm]
+        median_prediction: median prediction within window
+    """
+    
+    # inject flares, save light curves and a list of sources & sectors used
+    create_training_dataset(
+        num_sources=num_sources,
+        num_flares=num_flares,
+        save_type='injection_recovery',
+        cloud=True, 
+        save_plot=False,
+        verbose=verbose
+    )
+    
+    fn = Flarenet()
+    results = []
+
+    ij_dir = f"{PACKAGEDIR}/injection_recovery"
+
+    # read in TIC IDs and sectors for light curves with injected flares
+    sources = pd.read_csv(f"{ij_dir}/injection_recovery_sources.csv")
+    sources['TIC'] = sources['TIC'].astype(str)
+
+    if verbose:
+        print(f"Completed light curve injection; beginning predictions")
+    
+    # run predictions; save median and max prediction per injected flare
+    for _, row in sources.iterrows():
+        ticid = row['TIC']
+        sector = row['sector']
+
+        df = fn.predict(
+                ticid, 
+                sector=sector, 
+                data_dir='injection_recovery',
+                save_plot=save_plots,
+                verbose=verbose
+            )
+        
+        # calculate noise level for flare SNR
+        rolling_median = df['flux'].rolling(window=30, center=True).median()
+        lc_std = np.nanstd(df['flux'] - rolling_median)
+        
+        # load injection parameters returned by create_training_dataset
+        flareparams = np.load(f'{ij_dir}/artificial_flare_params/TIC {ticid}_{sector}_flareparams.npy')
+        flareparams = flareparams.reshape(-1, 3)
+        
+        # analyze each injected flare
+        for tpeak, amp, fwhm in flareparams:
+            # get predictions in window around flare peak
+            mask = (df['time'] > tpeak - rise_time_minutes/60/24) & (df['time'] < tpeak + fwhm)
+            local_preds = df.loc[mask, 'model_prediction']
+            
+            results.append({
+                'tic_id': ticid,
+                'sector': int(sector),
+                'tpeak': tpeak,
+                'amp': amp,
+                'fwhm': fwhm,
+                'snr': amp / lc_std,
+                'max_prediction': np.nanmax(local_preds),
+                'median_prediction': np.nanmedian(local_preds)
+            })
+    results_df = pd.DataFrame(results)
+    results_df.to_csv(f"{ij_dir}/injection_recovery_results.csv", index=None)
+    
+    return results_df
+
+
 class Flarenet(object):
     "Creates a class that contains functions to run the flarenet CNN model"
     def __init__(self,
@@ -133,7 +262,7 @@ class Flarenet(object):
 
         if model_weights:
             if verbose:
-                print(f"loading model weights from file {model_weights}")
+                print(f"Loading model weights from file {model_weights}")
             self.model.load_weights(model_weights)
         else:
             print('Model initialized with random weights. Please train your model or input.')
@@ -243,7 +372,7 @@ class Flarenet(object):
 
 
 
-    # Add this function to check for potential issues in the data
+    # Check for potential issues in the data
     def _check_data_integrity(target_data):
         print("Checking data integrity...")
         print(f"Columns present: {target_data.columns.tolist()}")
@@ -312,8 +441,8 @@ class Flarenet(object):
             TESS input catalog id to make predictions on 
         sector : int, optional:
             Sector for the TESS observations. If None, the first available sector will be used. 
-        prediction_dir : str, optional
-            file path to stor predictions, by default 'flarenet/prediction_data/'
+        data_dir : str, optional
+            file path to store predictions, by default 'flarenet/prediction_data/'
         verbose : int, optional
             Whether to print out information for debugging, by default 1
         save_plot : bool, default= True
@@ -441,7 +570,7 @@ class Flarenet(object):
         train : bool, optional
             Flag indicating if preparing a generator for training (True) or prediction (False).
             If train=True, possible false positive signals (exoplanet transits, pulsations, 
-            asteroid crossings) will randomly injected on-the-fly. By default True
+            asteroid crossings) will be randomly injected on-the-fly. By default True
 
         Returns
         -------

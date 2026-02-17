@@ -9,4 +9,4 @@ logger = logging.getLogger("flarenet")
 
 
 from .tessprep import TessStar, get_TESS_data  # noqa
-from .flarenet import Flarenet
+from .flarenet import Flarenet, injection_recovery
