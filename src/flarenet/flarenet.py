@@ -32,7 +32,7 @@ def create_training_dataset(
                     num_sources : int = 1000,
                     save_plot : bool = False,
                     num_flares : Union[int, str] = 100,
-                    save_type = 'train',
+                    save_type : str = 'train',
                     cloud : bool = False, 
                     verbose : int = 1,
                     ):
@@ -79,7 +79,7 @@ def create_training_dataset(
     if num_sources > N:
         raise ValueError(f"num_sources ({num_sources}) exceeds available quiet stars ({N})")
 
-    quietstars = quietstars.iloc[:num_sources].copy()
+    quietstars = quietstars.sample(n=num_sources, replace=False)
 
     if verbose:
         print(f"Injecting flares into {num_sources} lightcurves.")
