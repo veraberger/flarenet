@@ -191,7 +191,7 @@ class TessStar(object):
                         verbose : int = 1,
                         ):
         """
-        This function can be used to generate traning data by injecting flares into quiet TESS lightcurves
+        This function can be used to generate training data by injecting flares into quiet TESS lightcurves
         
         Parameters:
         -----------
@@ -222,7 +222,7 @@ class TessStar(object):
         #for ii, idx in enumerate(idxs):
 
         if verbose:
-            print(f"Creating flares for TIC {self.ticid} Sector {self.sector}")
+            print(f"Creating flares for {self.ticid} Sector {self.sector}")
 
 
         self.get_metadata()
@@ -261,7 +261,7 @@ class TessStar(object):
             plt.close()
         
         if verbose:
-            print(f"Flares successfully injected in TIC {self.ticid} Sector {self.sector}")
+            print(f"Flares successfully injected in {self.ticid} Sector {self.sector}")
 
 
 
