@@ -27,6 +27,6 @@ Use our model trained on real TESS light curves with injected false-positives, o
 The model outputs likelihoods only - choose your own confidence threshold for flares.
 
 
-If you use this code in publications, please cite Berger, Schanche, et al. (2025).
+If you use this code in publications, please cite Berger, Schanche, et al. (2026).
 
 MIT License
